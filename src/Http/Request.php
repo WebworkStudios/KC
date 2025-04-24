@@ -1,6 +1,5 @@
 <?php
 
-
 namespace Src\Http;
 
 use Src\Security\CsrfProtection;
@@ -18,9 +17,12 @@ class Request
     private string $uri;
     private string $clientIp;
     private ?string $body = null;
+    private ?array $jsonData = null;
 
     /**
      * Create a new request instance from globals
+     *
+     * @return self The new request instance
      */
     public static function createFromGlobals(): self
     {
@@ -58,11 +60,12 @@ class Request
 
         foreach ($this->server as $key => $value) {
             if (str_starts_with($key, 'HTTP_')) {
+                // Konvertiere HTTP_ACCEPT_LANGUAGE zu Accept-Language
                 $name = str_replace('_', '-', substr($key, 5));
-                $headers[$name] = $value;
+                $headers[$this->normalizeHeaderName($name)] = $value;
             } elseif (in_array($key, ['CONTENT_TYPE', 'CONTENT_LENGTH'], true)) {
                 $name = str_replace('_', '-', $key);
-                $headers[$name] = $value;
+                $headers[$this->normalizeHeaderName($name)] = $value;
             }
         }
 
@@ -70,7 +73,23 @@ class Request
     }
 
     /**
+     * Normalize a header name to standard format
+     *
+     * @param string $name The header name to normalize
+     * @return string The normalized header name
+     */
+    private function normalizeHeaderName(string $name): string
+    {
+        // Konvertiere zu Titel-Schreibweise mit Bindestrichen
+        // z.B. ACCEPT-LANGUAGE zu Accept-Language
+        $name = strtolower($name);
+        return str_replace(' ', '-', ucwords(str_replace('-', ' ', $name)));
+    }
+
+    /**
      * Detect the actual HTTP method
+     *
+     * @return string The detected HTTP method
      */
     private function detectMethod(): string
     {
@@ -83,8 +102,8 @@ class Request
             }
 
             // Check for X-HTTP-Method-Override header
-            if (isset($this->headers['X-HTTP-METHOD-OVERRIDE'])) {
-                return strtoupper($this->headers['X-HTTP-METHOD-OVERRIDE']);
+            if (isset($this->headers['X-Http-Method-Override'])) {
+                return strtoupper($this->headers['X-Http-Method-Override']);
             }
         }
 
@@ -93,6 +112,8 @@ class Request
 
     /**
      * Detect the request URI
+     *
+     * @return string The detected URI
      */
     private function detectUri(): string
     {
@@ -107,7 +128,9 @@ class Request
     }
 
     /**
-     * Detect client IP address
+     * Detect client IP address with improved security
+     *
+     * @return string The detected client IP address
      */
     private function detectClientIp(): string
     {
@@ -121,15 +144,27 @@ class Request
             'REMOTE_ADDR'
         ];
 
+        $trustedProxies = ['127.0.0.1', '::1']; // Hier vertrauenswürdige Proxies konfigurieren
+
         foreach ($ipKeys as $key) {
-            if (isset($this->server[$key]) && filter_var($this->server[$key], FILTER_VALIDATE_IP)) {
-                return $this->server[$key];
+            if (!isset($this->server[$key])) {
+                continue;
+            }
+
+            // Mehrere durch Komma getrennte IPs verarbeiten (X-Forwarded-For enthält mehrere)
+            $ips = explode(',', $this->server[$key]);
+            $ips = array_map('trim', $ips);
+
+            foreach ($ips as $ip) {
+                // Nur öffentliche IPs akzeptieren
+                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                    return $ip;
+                }
             }
         }
 
         return '0.0.0.0';
     }
-
 
     /**
      * Get a query parameter
@@ -143,9 +178,10 @@ class Request
         return $this->queryParams[$key] ?? $default;
     }
 
-
     /**
      * Get all query parameters
+     *
+     * @return array All query parameters
      */
     public function getQueryParams(): array
     {
@@ -166,6 +202,8 @@ class Request
 
     /**
      * Get all POST data
+     *
+     * @return array All POST data
      */
     public function getPostData(): array
     {
@@ -199,6 +237,8 @@ class Request
 
     /**
      * Get all input data (combines GET, POST and JSON body)
+     *
+     * @return array All input data
      */
     public function all(): array
     {
@@ -211,11 +251,15 @@ class Request
         return $input;
     }
 
-
     /**
      * Get filtered input value
+     *
+     * @param string $key Parameter name
+     * @param mixed $default Default value if parameter not found
+     * @param int $filter Filter type from PHP's filter constants
+     * @return mixed Filtered parameter value
      */
-    public function filter(string $key, $default = null, int $filter = FILTER_SANITIZE_SPECIAL_CHARS)
+    public function filter(string $key, mixed $default = null, int $filter = FILTER_SANITIZE_FULL_SPECIAL_CHARS): mixed
     {
         $value = $this->input($key, $default);
 
@@ -224,6 +268,9 @@ class Request
 
     /**
      * Check if input has a specific key
+     *
+     * @param string $key The key to check for
+     * @return bool True if the key exists, false otherwise
      */
     public function has(string $key): bool
     {
@@ -248,10 +295,12 @@ class Request
 
     /**
      * Check if request has JSON content type
+     *
+     * @return bool True if content type is JSON, false otherwise
      */
     public function isJson(): bool
     {
-        $contentType = $this->getHeader('CONTENT-TYPE');
+        $contentType = $this->getHeader('Content-Type');
         return $contentType && str_contains($contentType, 'application/json');
     }
 
@@ -262,31 +311,40 @@ class Request
      */
     public function getJsonBody(): array
     {
-        static $jsonData = null;
-
-        if ($jsonData === null) {
+        if ($this->jsonData === null) {
             if (!$this->isJson()) {
-                $jsonData = [];
+                $this->jsonData = [];
             } else {
                 $body = $this->getBody();
-                $data = json_decode($body, true);
-                $jsonData = is_array($data) ? $data : [];
+                try {
+                    $data = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+                    $this->jsonData = is_array($data) ? $data : [];
+                } catch (\JsonException $e) {
+                    // Return empty array on JSON decoding error
+                    $this->jsonData = [];
+                }
             }
         }
 
-        return $jsonData;
+        return $this->jsonData;
     }
 
     /**
      * Get a cookie value
+     *
+     * @param string $key Cookie name
+     * @param mixed $default Default value if cookie not found
+     * @return mixed Cookie value or default
      */
-    public function cookie(string $key, $default = null)
+    public function cookie(string $key, mixed $default = null): mixed
     {
         return $this->cookies[$key] ?? $default;
     }
 
     /**
      * Get all cookies
+     *
+     * @return array All cookies
      */
     public function getCookies(): array
     {
@@ -295,14 +353,19 @@ class Request
 
     /**
      * Get an uploaded file
+     *
+     * @param string $key File input name
+     * @return array|null File data or null if not found
      */
-    public function file(string $key)
+    public function file(string $key): ?array
     {
         return $this->files[$key] ?? null;
     }
 
     /**
      * Get all uploaded files
+     *
+     * @return array All uploaded files
      */
     public function getFiles(): array
     {
@@ -311,6 +374,9 @@ class Request
 
     /**
      * Check if file was uploaded
+     *
+     * @param string $key File input name
+     * @return bool True if file was uploaded, false otherwise
      */
     public function hasFile(string $key): bool
     {
@@ -320,14 +386,20 @@ class Request
 
     /**
      * Get a server variable
+     *
+     * @param string $key Server variable name
+     * @param mixed $default Default value if server variable not found
+     * @return mixed Server variable value or default
      */
-    public function server(string $key, $default = null)
+    public function server(string $key, mixed $default = null): mixed
     {
         return $this->server[$key] ?? $default;
     }
 
     /**
      * Get request HTTP method
+     *
+     * @return string The HTTP method
      */
     public function getMethod(): string
     {
@@ -336,6 +408,9 @@ class Request
 
     /**
      * Check if request uses a specific HTTP method
+     *
+     * @param string $method The method to check
+     * @return bool True if the request method matches, false otherwise
      */
     public function isMethod(string $method): bool
     {
@@ -344,6 +419,8 @@ class Request
 
     /**
      * Get request URI
+     *
+     * @return string The request URI
      */
     public function getUri(): string
     {
@@ -352,15 +429,30 @@ class Request
 
     /**
      * Get a request header
+     *
+     * @param string $name Header name (case-insensitive)
+     * @param mixed $default Default value if header not found
+     * @return mixed Header value or default
      */
-    public function getHeader(string $name, $default = null)
+    public function getHeader(string $name, mixed $default = null): mixed
     {
-        $name = strtoupper(str_replace('-', '_', $name));
-        return $this->headers[$name] ?? $default;
+        // Normalisiere den Header-Namen für den internen Vergleich
+        $normalizedName = $this->normalizeHeaderName($name);
+
+        // Suche in den normalisierten Header-Namen
+        foreach ($this->headers as $key => $value) {
+            if (strcasecmp($this->normalizeHeaderName($key), $normalizedName) === 0) {
+                return $value;
+            }
+        }
+
+        return $default;
     }
 
     /**
      * Get all request headers
+     *
+     * @return array All headers
      */
     public function getHeaders(): array
     {
@@ -369,15 +461,27 @@ class Request
 
     /**
      * Check if request has a specific header
+     *
+     * @param string $name Header name (case-insensitive)
+     * @return bool True if the header exists, false otherwise
      */
     public function hasHeader(string $name): bool
     {
-        $name = strtoupper(str_replace('-', '_', $name));
-        return isset($this->headers[$name]);
+        $normalizedName = $this->normalizeHeaderName($name);
+
+        foreach ($this->headers as $key => $value) {
+            if (strcasecmp($this->normalizeHeaderName($key), $normalizedName) === 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
      * Get client IP address
+     *
+     * @return string The client IP address
      */
     public function getClientIp(): string
     {
@@ -386,27 +490,39 @@ class Request
 
     /**
      * Check if request was made via AJAX
+     *
+     * @return bool True if request was made via AJAX, false otherwise
      */
     public function isAjax(): bool
     {
-        return $this->getHeader('X-REQUESTED-WITH') === 'XMLHttpRequest';
+        return $this->getHeader('X-Requested-With') === 'XMLHttpRequest';
     }
 
     /**
      * Check if request is HTTPS
+     *
+     * @return bool True if request is secure, false otherwise
      */
     public function isSecure(): bool
     {
-        return (isset($this->server['HTTPS']) && $this->server['HTTPS'] !== 'off') ||
-            $this->server['SERVER_PORT'] === 443;
+        if ((isset($this->server['HTTPS']) && $this->server['HTTPS'] !== 'off') ||
+            (isset($this->server['SERVER_PORT']) && $this->server['SERVER_PORT'] === 443)) {
+            return true;
+        }
+
+        // Prüfen auf Proxy-Header, falls hinter einem Load Balancer
+        return $this->getHeader('X-Forwarded-Proto') === 'https';
     }
 
     /**
      * Validate CSRF token
+     *
+     * @param CsrfProtection $csrf The CSRF protection instance
+     * @return bool True if CSRF token is valid, false otherwise
      */
     public function validateCsrf(CsrfProtection $csrf): bool
     {
-        $token = $this->input('_csrf') ?? $this->getHeader('X-CSRF-TOKEN');
+        $token = $this->input('_csrf') ?? $this->getHeader('X-Csrf-Token');
 
         if (!$token) {
             return false;
