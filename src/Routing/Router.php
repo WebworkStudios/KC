@@ -15,6 +15,7 @@ class Router
     private ?string $cacheFile = null;
     private bool $cacheEnabled = false;
     private array $compiledRoutes = [];
+    private array $methodIndex = [];
 
     public function __construct(private AppConfig $config)
     {
@@ -22,9 +23,15 @@ class Router
         $this->cacheFile = $config->get('router.cache_file');
 
         if ($this->cacheEnabled && $this->cacheFile && file_exists($this->cacheFile)) {
-            $this->routes = require $this->cacheFile;
-            // Pre-compile routes after loading from cache
-            $this->preCompileRoutes();
+            $cacheData = require $this->cacheFile;
+            if (is_array($cacheData) && isset($cacheData['routes'], $cacheData['compiledRoutes'])) {
+                $this->routes = $cacheData['routes'];
+                $this->compiledRoutes = $cacheData['compiledRoutes'];
+                $this->buildMethodIndex();
+            } else {
+                $this->routes = $cacheData;
+                $this->preCompileRoutes();
+            }
         }
     }
 
@@ -69,11 +76,26 @@ class Router
     }
 
     /**
+     * Register a route for multiple HTTP methods
+     */
+    public function map(array $methods, string $uri, string $action, ?string $name = null): self
+    {
+        foreach ($methods as $method) {
+            $this->addRoute(strtoupper($method), $uri, $action, $name);
+        }
+
+        return $this;
+    }
+
+    /**
      * Add a route to the collection
      */
     private function addRoute(string $method, string $uri, string $action, ?string $name = null): self
     {
         $uri = $this->getGroupedUri($uri);
+
+        // Action validieren
+        $this->validateAction($action);
 
         $route = [
             'method' => $method,
@@ -86,11 +108,39 @@ class Router
         $this->routes[$routeId] = $route;
         $this->compiledRoutes[$routeId] = $this->compileRoutePattern($uri);
 
+        if (!isset($this->methodIndex[$method])) {
+            $this->methodIndex[$method] = [];
+        }
+        $this->methodIndex[$method][] = $routeId;
+
+        if ($method === 'ANY') {
+            $methods = ['GET', 'POST', 'PUT', 'DELETE'];
+            foreach ($methods as $httpMethod) {
+                if (!isset($this->methodIndex[$httpMethod])) {
+                    $this->methodIndex[$httpMethod] = [];
+                }
+                $this->methodIndex[$httpMethod][] = $routeId;
+            }
+        }
+
         if ($name !== null) {
             $this->namedRoutes[$name] = $routeId;
         }
 
         return $this;
+    }
+
+    /**
+     * Validate that the action is in the correct format
+     *
+     * @throws InvalidArgumentException if the action format is invalid
+     */
+    private function validateAction(string $action): void
+    {
+        if (!preg_match('/^[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*(\\\\[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*)*$/', $action) &&
+            !class_exists($action)) {
+            throw new InvalidArgumentException("Invalid action format: $action");
+        }
     }
 
     /**
@@ -108,6 +158,20 @@ class Router
                 // Handle custom regex patterns
                 if (str_contains($match, ':')) {
                     [$param, $pattern] = explode(':', $match, 2);
+
+                    if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $param)) {
+                        throw new InvalidArgumentException("Invalid parameter name: $param in route: $uri");
+                    }
+
+                    try {
+                        preg_match("/$pattern/", "");
+                    } catch (\Exception $e) {
+                        throw new InvalidArgumentException("Invalid regex pattern for parameter $param: $pattern");
+                    }
+                } else {
+                    if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $param)) {
+                        throw new InvalidArgumentException("Invalid parameter name: $param in route: $uri");
+                    }
                 }
 
                 $parameters[$param] = $pattern;
@@ -142,6 +206,7 @@ class Router
      */
     public function fallback(string $action): void
     {
+        $this->validateAction($action);
         $this->fallbackHandler = $action;
     }
 
@@ -187,6 +252,8 @@ class Router
         foreach ($parameters as $key => $value) {
             $pattern = "{{$key}}";
             if (str_contains($uri, $pattern)) {
+                // Einfache Validierung und Sanitierung des Parameter-Werts
+                $value = $this->sanitizeParameterValue((string)$value);
                 $uri = str_replace($pattern, $value, $uri);
             }
         }
@@ -205,6 +272,36 @@ class Router
         foreach ($this->routes as $id => $route) {
             $this->compiledRoutes[$id] = $this->compileRoutePattern($route['uri']);
         }
+
+        $this->buildMethodIndex();
+    }
+
+    /**
+     * Build method index for faster route matching
+     */
+    private function buildMethodIndex(): void
+    {
+        $this->methodIndex = [];
+
+        foreach ($this->routes as $id => $route) {
+            $method = $route['method'];
+
+            if (!isset($this->methodIndex[$method])) {
+                $this->methodIndex[$method] = [];
+            }
+            $this->methodIndex[$method][] = $id;
+
+            // ANY-Routen in alle Methoden-Indizes einfügen
+            if ($method === 'ANY') {
+                $methods = ['GET', 'POST', 'PUT', 'DELETE'];
+                foreach ($methods as $httpMethod) {
+                    if (!isset($this->methodIndex[$httpMethod])) {
+                        $this->methodIndex[$httpMethod] = [];
+                    }
+                    $this->methodIndex[$httpMethod][] = $id;
+                }
+            }
+        }
     }
 
     /**
@@ -219,11 +316,11 @@ class Router
     {
         $uri = trim($uri, '/');
 
-        foreach ($this->routes as $id => $route) {
-            if ($route['method'] !== $method && $route['method'] !== 'ANY') {
-                continue;
-            }
+        // Zuerst nur die Routen für die spezifische Methode prüfen
+        $routeIds = $this->methodIndex[$method] ?? [];
 
+        foreach ($routeIds as $id) {
+            $route = $this->routes[$id];
             $pattern = $this->compiledRoutes[$id] ?? $this->compileRoutePattern($route['uri']);
 
             if (preg_match($pattern, $uri, $matches)) {
@@ -236,6 +333,7 @@ class Router
             }
         }
 
+        // Fallback-Handler prüfen
         if ($this->fallbackHandler) {
             return [
                 'action' => $this->fallbackHandler,
@@ -282,10 +380,22 @@ class Router
         array_shift($matches);
 
         foreach ($paramNames as $index => $name) {
-            $parameters[$name] = $matches[$index] ?? null;
+            $value = $matches[$index] ?? null;
+            if ($value !== null) {
+                $value = $this->sanitizeParameterValue($value);
+            }
+            $parameters[$name] = $value;
         }
 
         return $parameters;
+    }
+
+    /**
+     * Sanitize route parameter values
+     */
+    private function sanitizeParameterValue(string $value): string
+    {
+        return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
     }
 
     /**
@@ -299,9 +409,28 @@ class Router
             return false;
         }
 
-        $content = '<?php return ' . var_export($this->routes, true) . ';';
+        $this->preCompileRoutes();
 
-        return file_put_contents($this->cacheFile, $content) !== false;
+        $cacheData = [
+            'routes' => $this->routes,
+            'compiledRoutes' => $this->compiledRoutes
+        ];
+
+        $content = '<?php return ' . var_export($cacheData, true) . ';';
+
+        $tempFile = $this->cacheFile . '.tmp.' . uniqid('', true);
+
+        if (file_put_contents($tempFile, $content) === false) {
+            return false;
+        }
+
+        $result = rename($tempFile, $this->cacheFile);
+
+        if (!$result && file_exists($tempFile)) {
+            unlink($tempFile);
+        }
+
+        return $result;
     }
 
     /**
