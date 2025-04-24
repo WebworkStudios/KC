@@ -1,30 +1,70 @@
 <?php
 
+declare(strict_types=1);
 
 namespace Src\Config;
 
 use Closure;
+use Psr\Container\ContainerInterface;
 use ReflectionClass;
 use ReflectionParameter;
-use RuntimeException;
+use ReflectionFunction;
+use ReflectionMethod;
+use ReflectionUnionType;
+use ReflectionIntersectionType;
+use Src\Config\Exceptions\CircularDependencyException;
+use Src\Config\Exceptions\ContainerException;
+use Src\Config\Exceptions\NotFoundException;
+use Src\Config\Exceptions\UnresolvableParameterException;
 
-class Container
+class Container implements ContainerInterface
 {
+    /**
+     * Container bindings
+     *
+     * @var array<string, array{concrete: Closure, shared: bool}>
+     */
     private array $bindings = [];
+
+    /**
+     * Resolved instances
+     *
+     * @var array<string, mixed>
+     */
     private array $instances = [];
+
+    /**
+     * Abstract aliases
+     *
+     * @var array<string, string>
+     */
     private array $aliases = [];
+
+    /**
+     * Resolution stack for detecting circular dependencies
+     *
+     * @var string[]
+     */
+    private array $resolutionStack = [];
+
+    /**
+     * Cache for reflection objects
+     *
+     * @var array<string, ReflectionClass>
+     */
+    private array $reflectionCache = [];
 
     /**
      * Register a binding in the container
      */
-    public function bind(string $abstract, $concrete = null, bool $shared = false): void
+    public function bind(string $abstract, mixed $concrete = null, bool $shared = false): void
     {
         // If no concrete type is given, use the abstract type
         $concrete = $concrete ?: $abstract;
 
         // If the concrete type is not a closure, make it one
         if (!$concrete instanceof Closure) {
-            $concrete = function ($container) use ($concrete) {
+            $concrete = function (Container $container) use ($concrete): mixed {
                 return $container->build($concrete);
             };
         }
@@ -35,7 +75,7 @@ class Container
     /**
      * Register a shared binding in the container (singleton)
      */
-    public function singleton(string $abstract, $concrete = null): void
+    public function singleton(string $abstract, mixed $concrete = null): void
     {
         $this->bind($abstract, $concrete, true);
     }
@@ -43,7 +83,7 @@ class Container
     /**
      * Register an existing instance in the container
      */
-    public function instance(string $abstract, $instance): void
+    public function instance(string $abstract, mixed $instance): void
     {
         // Register an alias if the abstract is an interface and instance is a concrete class
         if (interface_exists($abstract) && is_object($instance)) {
@@ -58,41 +98,63 @@ class Container
      */
     public function alias(string $abstract, string $alias): void
     {
+        if ($abstract === $alias) {
+            throw new ContainerException("Cannot alias [{$abstract}] to itself.");
+        }
+
         $this->aliases[$alias] = $abstract;
     }
 
     /**
      * Resolve a type from the container
+     *
+     * @throws CircularDependencyException
+     * @throws NotFoundException
+     * @throws ContainerException
      */
-    public function resolve(string $abstract)
+    public function resolve(string $abstract): mixed
     {
-        // If an alias exists for the abstract type, use that instead
-        $abstract = $this->getAlias($abstract);
-
-        // If an instance of the type exists, return it
-        if (isset($this->instances[$abstract])) {
-            return $this->instances[$abstract];
+        // Check for circular dependencies
+        if (in_array($abstract, $this->resolutionStack, true)) {
+            throw new CircularDependencyException(
+                "Circular dependency detected: " . implode(' -> ', $this->resolutionStack) . " -> {$abstract}"
+            );
         }
 
-        // If no binding exists, try to build it
-        $concrete = $this->getConcrete($abstract);
+        // Add to the resolution stack
+        $this->resolutionStack[] = $abstract;
 
-        // If the type is registered as a singleton and we've already resolved it,
-        // return the existing instance
-        $object = $this->build($concrete);
+        try {
+            // If an alias exists for the abstract type, use that instead
+            $abstract = $this->getAlias($abstract);
 
-        // If the binding is registered as a singleton, store it
-        if ($this->isShared($abstract)) {
-            $this->instances[$abstract] = $object;
+            // If an instance of the type exists, return it
+            if (isset($this->instances[$abstract])) {
+                return $this->instances[$abstract];
+            }
+
+            // If no binding exists, try to build it
+            $concrete = $this->getConcrete($abstract);
+
+            // Build the concrete instance
+            $object = $this->build($concrete);
+
+            // If the binding is registered as a singleton, store it
+            if ($this->isShared($abstract)) {
+                $this->instances[$abstract] = $object;
+            }
+
+            return $object;
+        } finally {
+            // Always remove from resolution stack after resolution
+            array_pop($this->resolutionStack);
         }
-
-        return $object;
     }
 
     /**
      * Get the concrete type for an abstract type
      */
-    private function getConcrete(string $abstract)
+    private function getConcrete(string $abstract): mixed
     {
         // If no binding exists, return the abstract type
         if (!isset($this->bindings[$abstract])) {
@@ -116,13 +178,24 @@ class Container
      */
     private function getAlias(string $abstract): string
     {
-        return isset($this->aliases[$abstract]) ? $this->getAlias($this->aliases[$abstract]) : $abstract;
+        if (!isset($this->aliases[$abstract])) {
+            return $abstract;
+        }
+
+        // Check for circular references in aliases
+        if ($this->aliases[$abstract] === $abstract) {
+            throw new ContainerException("Circular reference found in alias: {$abstract}");
+        }
+
+        return $this->getAlias($this->aliases[$abstract]);
     }
 
     /**
      * Instantiate a concrete instance of the type
+     *
+     * @throws ContainerException
      */
-    public function build($concrete)
+    public function build(mixed $concrete): mixed
     {
         // If the concrete type is a closure, execute it and return the result
         if ($concrete instanceof Closure) {
@@ -130,19 +203,19 @@ class Container
         }
 
         // Create a reflection class instance for the concrete type
-        $reflector = new ReflectionClass($concrete);
+        $reflector = $this->getReflector($concrete);
 
         // If the class is not instantiable, throw an exception
         if (!$reflector->isInstantiable()) {
-            throw new RuntimeException("Class [$concrete] is not instantiable");
+            throw new ContainerException("Class [{$concrete}] is not instantiable");
         }
 
         // Get the constructor
         $constructor = $reflector->getConstructor();
 
         // If there is no constructor, just return a new instance
-        if (is_null($constructor)) {
-            return new $concrete();
+        if ($constructor === null) {
+            return $reflector->newInstance();
         }
 
         // Get the constructor parameters
@@ -156,30 +229,112 @@ class Container
     }
 
     /**
+     * Get a reflection class instance for a concrete type
+     *
+     * @throws ContainerException
+     */
+    private function getReflector(string $concrete): ReflectionClass
+    {
+        if (!isset($this->reflectionCache[$concrete])) {
+            try {
+                $this->reflectionCache[$concrete] = new ReflectionClass($concrete);
+            } catch (\ReflectionException $e) {
+                throw new ContainerException("Error getting ReflectionClass for [{$concrete}]: " . $e->getMessage());
+            }
+        }
+
+        return $this->reflectionCache[$concrete];
+    }
+
+    /**
      * Resolve all dependencies of a class constructor
+     *
+     * @param ReflectionParameter[] $parameters
+     * @return array<mixed>
+     * @throws UnresolvableParameterException
      */
     private function resolveDependencies(array $parameters): array
     {
         $dependencies = [];
 
         foreach ($parameters as $parameter) {
-            // Get the parameter class type hint if it exists
+            // Get the parameter type hint
             $type = $parameter->getType();
 
-            // If no type hint or type is built-in (e.g., string, int), try to use default value
-            if (!$type || $type->isBuiltin()) {
-                // If the parameter has a default value, use it
+            // Handle different types of parameter type hints
+            if ($type === null) {
+                // If no type hint, try to use default value
                 if ($parameter->isDefaultValueAvailable()) {
                     $dependencies[] = $parameter->getDefaultValue();
                 } elseif ($parameter->isOptional()) {
                     // If the parameter is optional but has no default, use null
                     $dependencies[] = null;
                 } else {
-                    throw new RuntimeException("Cannot resolve parameter [{$parameter->getName()}] without type hint");
+                    throw new UnresolvableParameterException(
+                        "Cannot resolve parameter [{$parameter->getName()}] without type hint"
+                    );
                 }
+            } elseif ($type->isBuiltin()) {
+                // Built-in types like string, int, etc.
+                if ($parameter->isDefaultValueAvailable()) {
+                    $dependencies[] = $parameter->getDefaultValue();
+                } elseif ($parameter->isOptional()) {
+                    $dependencies[] = null;
+                } else {
+                    throw new UnresolvableParameterException(
+                        "Cannot resolve built-in type parameter [{$parameter->getName()}] without default value"
+                    );
+                }
+            } elseif ($type instanceof ReflectionUnionType) {
+                // Handle union types (PHP 8.0+)
+                $resolved = false;
+                $exceptions = [];
+
+                foreach ($type->getTypes() as $unionType) {
+                    if ($unionType->isBuiltin()) {
+                        continue;
+                    }
+
+                    try {
+                        $dependencies[] = $this->resolve($unionType->getName());
+                        $resolved = true;
+                        break;
+                    } catch (\Exception $e) {
+                        $exceptions[] = $e->getMessage();
+                    }
+                }
+
+                if (!$resolved) {
+                    if ($parameter->isDefaultValueAvailable()) {
+                        $dependencies[] = $parameter->getDefaultValue();
+                    } elseif ($parameter->isOptional()) {
+                        $dependencies[] = null;
+                    } else {
+                        throw new UnresolvableParameterException(
+                            "Cannot resolve union type parameter [{$parameter->getName()}]: " . implode(', ', $exceptions)
+                        );
+                    }
+                }
+            } elseif ($type instanceof ReflectionIntersectionType) {
+                // Handle intersection types (PHP 8.1+)
+                throw new UnresolvableParameterException(
+                    "Cannot resolve intersection type parameter [{$parameter->getName()}]. Intersection types are not supported for automatic resolution."
+                );
             } else {
-                // If the parameter has a class type hint, resolve it from the container
-                $dependencies[] = $this->resolve($type->getName());
+                // Class or interface type
+                try {
+                    $dependencies[] = $this->resolve($type->getName());
+                } catch (\Exception $e) {
+                    if ($parameter->isDefaultValueAvailable()) {
+                        $dependencies[] = $parameter->getDefaultValue();
+                    } elseif ($parameter->isOptional()) {
+                        $dependencies[] = null;
+                    } else {
+                        throw new UnresolvableParameterException(
+                            "Cannot resolve class type parameter [{$parameter->getName()}]: " . $e->getMessage()
+                        );
+                    }
+                }
             }
         }
 
@@ -189,45 +344,58 @@ class Container
     /**
      * Determine if a given type has been bound
      */
-    public function has(string $abstract): bool
+    public function has(string $id): bool
     {
-        return isset($this->bindings[$abstract]) || isset($this->instances[$abstract]) || isset($this->aliases[$abstract]);
+        return isset($this->bindings[$id]) || isset($this->instances[$id]) || isset($this->aliases[$id]);
     }
 
     /**
      * Get a registered instance
+     *
+     * @throws NotFoundException
      */
-    public function get(string $abstract)
+    public function get(string $id): mixed
     {
-        return $this->resolve($abstract);
+        if (!$this->has($id)) {
+            throw new NotFoundException("No binding found for [{$id}]");
+        }
+
+        return $this->resolve($id);
     }
 
     /**
      * "Make" an instance (alias for resolve)
      */
-    public function make(string $abstract)
+    public function make(string $abstract): mixed
     {
         return $this->resolve($abstract);
     }
 
     /**
      * Call a method on an object with automatic dependency injection
+     *
+     * @throws ContainerException
      */
-    public function call($callback, array $parameters = [])
+    public function call(callable|array|string $callback, array $parameters = []): mixed
     {
-        if (is_string($callback) && strpos($callback, '@') !== false) {
-            [$class, $method] = explode('@', $callback);
+        if (is_string($callback) && str_contains($callback, '@')) {
+            [$class, $method] = explode('@', $callback, 2);
             $callback = [$this->resolve($class), $method];
         }
 
-        $reflector = is_array($callback)
-            ? new \ReflectionMethod($callback[0], $callback[1])
-            : new \ReflectionFunction($callback);
+        try {
+            $reflector = is_array($callback)
+                ? new ReflectionMethod($callback[0], $callback[1])
+                : new ReflectionFunction($callback);
+        } catch (\ReflectionException $e) {
+            throw new ContainerException("Error creating reflection for callback: " . $e->getMessage());
+        }
 
+        $callParameters = $reflector->getParameters();
         $dependencies = [];
 
-        foreach ($reflector->getParameters() as $parameter) {
-            // Check if the parameter is in the provided parameters
+        foreach ($callParameters as $parameter) {
+            // Check if the parameter is in the provided parameters by name
             if (array_key_exists($parameter->getName(), $parameters)) {
                 $dependencies[] = $parameters[$parameter->getName()];
                 continue;
@@ -236,21 +404,98 @@ class Container
             // Try to resolve from the container
             $type = $parameter->getType();
 
-            if (!$type || $type->isBuiltin()) {
+            if ($type === null || $type->isBuiltin()) {
                 // If no type hint or built-in type, check for default value
                 if ($parameter->isDefaultValueAvailable()) {
                     $dependencies[] = $parameter->getDefaultValue();
                 } elseif ($parameter->isOptional()) {
                     $dependencies[] = null;
                 } else {
-                    throw new RuntimeException("Cannot resolve parameter [{$parameter->getName()}] without type hint");
+                    throw new UnresolvableParameterException(
+                        "Cannot resolve parameter [{$parameter->getName()}] for callback without type hint"
+                    );
+                }
+            } elseif ($type instanceof ReflectionUnionType) {
+                // Handle union types
+                $resolved = false;
+                foreach ($type->getTypes() as $unionType) {
+                    if ($unionType->isBuiltin()) {
+                        continue;
+                    }
+
+                    try {
+                        $dependencies[] = $this->resolve($unionType->getName());
+                        $resolved = true;
+                        break;
+                    } catch (\Exception $e) {
+                        // Try next type
+                    }
+                }
+
+                if (!$resolved) {
+                    if ($parameter->isDefaultValueAvailable()) {
+                        $dependencies[] = $parameter->getDefaultValue();
+                    } elseif ($parameter->isOptional()) {
+                        $dependencies[] = null;
+                    } else {
+                        throw new UnresolvableParameterException(
+                            "Cannot resolve union type parameter [{$parameter->getName()}] for callback"
+                        );
+                    }
                 }
             } else {
                 // If class type hint, resolve from container
-                $dependencies[] = $this->resolve($type->getName());
+                try {
+                    $dependencies[] = $this->resolve($type->getName());
+                } catch (\Exception $e) {
+                    if ($parameter->isDefaultValueAvailable()) {
+                        $dependencies[] = $parameter->getDefaultValue();
+                    } elseif ($parameter->isOptional()) {
+                        $dependencies[] = null;
+                    } else {
+                        throw new UnresolvableParameterException(
+                            "Cannot resolve parameter [{$parameter->getName()}] for callback: " . $e->getMessage()
+                        );
+                    }
+                }
             }
         }
 
         return call_user_func_array($callback, $dependencies);
+    }
+
+    /**
+     * Clear a previously resolved instance
+     */
+    public function forgetInstance(string $abstract): void
+    {
+        unset($this->instances[$abstract]);
+    }
+
+    /**
+     * Clear all resolved instances
+     */
+    public function forgetAllInstances(): void
+    {
+        $this->instances = [];
+    }
+
+    /**
+     * Clear reflection cache
+     */
+    public function clearReflectionCache(): void
+    {
+        $this->reflectionCache = [];
+    }
+
+    /**
+     * Clear all container bindings
+     */
+    public function flush(): void
+    {
+        $this->bindings = [];
+        $this->instances = [];
+        $this->aliases = [];
+        $this->reflectionCache = [];
     }
 }
