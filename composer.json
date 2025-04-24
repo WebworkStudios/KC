@@ -1,39 +1,54 @@
 {
-  "name": "app/core",
-  "description": "Ein PHP-Framework mit einem performanten DI-Container",
+  "name": "your-vendor/your-project",
+  "description": "Ein modernes PHP 8.4 Framework nach ADR-Muster",
   "type": "project",
   "license": "MIT",
   "authors": [
     {
-      "name": "Ihr Name",
-      "email": "ihre-email@example.com"
+      "name": "Dein Name",
+      "email": "deine-email@example.com"
     }
   ],
   "minimum-stability": "stable",
   "require": {
-    "php": "^8.4"
+    "php": "^8.4",
+    "ext-pdo": "*",
+    "ext-json": "*",
+    "ext-mbstring": "*"
   },
   "require-dev": {
-    "phpunit/phpunit": "^10.0",
-    "squizlabs/php_codesniffer": "^3.7"
+    "phpunit/phpunit": "^11.0",
+    "phpstan/phpstan": "^1.10",
+    "friendsofphp/php-cs-fixer": "^3.38"
   },
   "autoload": {
     "psr-4": {
-      "Src\\Core\\": "src/"
-    }
+      "App\\": "app/",
+      "Src\\": "src/"
+    },
+    "files": [
+      "src/Utils/helpers.php"
+    ]
   },
   "autoload-dev": {
     "psr-4": {
-      "App\\Core\\Tests\\": "tests/"
+      "Tests\\": "tests/"
     }
   },
   "scripts": {
     "test": "phpunit",
-    "cs-check": "phpcs",
-    "cs-fix": "phpcbf"
+    "analyse": "phpstan analyse",
+    "cs-fix": "php-cs-fixer fix",
+    "post-create-project-cmd": [
+      "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
+    ],
+    "post-autoload-dump": [
+      "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
+    ]
   },
   "config": {
-    "sort-packages": true,
-    "optimize-autoloader": true
+    "optimize-autoloader": true,
+    "preferred-install": "dist",
+    "sort-packages": true
   }
 }

@@ -1,0 +1,33 @@
+# Verhindern Sie die Anzeige von Verzeichnislistings
+Options -Indexes
+
+# Aktivieren Sie die Rewrite-Engine
+RewriteEngine On
+
+# Rewrite-Basis auf das Wurzelverzeichnis setzen
+RewriteBase /
+
+# Überprüfen, ob es sich nicht um eine vorhandene Datei oder ein vorhandenes Verzeichnis handelt
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Alle Anfragen an index.php weiterleiten
+RewriteRule ^(.*)$ index.php [QSA,L]
+
+# Sicherstellen, dass HTTP-Authentifizierungswerte weitergegeben werden
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+
+# Security Headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    Header set Permissions-Policy "geolocation=self"
+    Header set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+</IfModule>
+
+# Deaktivieren Sie die Ausführung potenziell gefährlicher Dateien
+<FilesMatch "(?i)\.(ph(p[3457]?|t|tml)|[aj]sp|exe|dll)$">
+    Require all denied
+</FilesMatch>
