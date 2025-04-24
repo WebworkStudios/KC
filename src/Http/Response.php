@@ -88,25 +88,45 @@ class Response
     }
 
     /**
-     * Set content type
+     * Set content type with proper charset handling
+     *
+     * @param string $contentType The MIME content type
+     * @return self Fluent interface
      */
     public function setContentType(string $contentType): self
     {
         $this->contentType = $contentType;
-        $this->setHeader('Content-Type', $contentType . '; charset=' . $this->charset);
 
+        // Only add charset for text-based content types
+        if (str_starts_with($contentType, 'text/') ||
+            in_array($contentType, ['application/json', 'application/xml', 'application/javascript'], true)) {
+            $contentType .= '; charset=' . $this->charset;
+        }
+
+        $this->setHeader('Content-Type', $contentType);
         return $this;
     }
 
     /**
      * Set response as JSON
+     *
+     * @param mixed $data Data to be encoded as JSON
+     * @param int $statusCode HTTP status code
+     * @param int $options JSON encoding options
+     * @return self Fluent interface
+     * @throws \JsonException
      */
-    public function json($data, int $statusCode = 200): self
+    public function json(mixed $data, int $statusCode = 200, int $options = 0): self
     {
         $this->setContentType('application/json');
         $this->setStatusCode($statusCode);
-        $this->setContent(json_encode($data));
 
+        $jsonContent = json_encode($data, $options);
+        if ($jsonContent === false) {
+            throw new \JsonException(json_last_error_msg(), json_last_error());
+        }
+
+        $this->setContent($jsonContent);
         return $this;
     }
 
@@ -146,8 +166,19 @@ class Response
         return $this;
     }
 
+
     /**
-     * Set a cookie
+     * Set a cookie with improved defaults for security
+     *
+     * @param string $name Cookie name
+     * @param string $value Cookie value
+     * @param int $expires Expiration timestamp
+     * @param string $path Cookie path
+     * @param string $domain Cookie domain
+     * @param bool $secure Only transmit over HTTPS
+     * @param bool $httpOnly Inaccessible to JavaScript
+     * @param string $sameSite SameSite policy (Lax, Strict, None)
+     * @return self Fluent interface
      */
     public function setCookie(
         string $name,
@@ -155,10 +186,19 @@ class Response
         int $expires = 0,
         string $path = '/',
         string $domain = '',
-        bool $secure = false,
+        bool $secure = true, // Changed default to true for better security
         bool $httpOnly = true,
         string $sameSite = 'Lax'
     ): self {
+        // Validate SameSite value
+        $validSameSiteValues = ['None', 'Lax', 'Strict'];
+        $sameSite = in_array($sameSite, $validSameSiteValues, true) ? $sameSite : 'Lax';
+
+        // If SameSite is None, secure must be true according to spec
+        if ($sameSite === 'None' && !$secure) {
+            $secure = true;
+        }
+
         $this->cookies[$name] = [
             'value' => $value,
             'expires' => $expires,
@@ -211,10 +251,17 @@ class Response
     }
 
     /**
-     * Send HTTP response
+     * Send HTTP response with improved error handling
+     *
+     * @throws \RuntimeException If headers have already been sent
      */
     public function send(): void
     {
+        // Check if headers have already been sent
+        if (headers_sent($file, $line)) {
+            throw new \RuntimeException("Headers already sent in $file on line $line");
+        }
+
         // Send HTTP status code
         http_response_code($this->statusCode);
 
@@ -244,7 +291,13 @@ class Response
             echo $this->content;
         }
 
-        // Terminate script execution if needed
+        // Optional: flush output buffers before finishing request
+        if (ob_get_level() > 0) {
+            ob_flush();
+            flush();
+        }
+
+        // Terminate script execution if in FastCGI environment
         if (function_exists('fastcgi_finish_request')) {
             fastcgi_finish_request();
         }

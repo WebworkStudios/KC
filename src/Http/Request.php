@@ -49,6 +49,8 @@ class Request
 
     /**
      * Parse headers from server variables
+     *
+     * @return array Parsed headers
      */
     private function parseHeaders(): array
     {
@@ -58,7 +60,7 @@ class Request
             if (str_starts_with($key, 'HTTP_')) {
                 $name = str_replace('_', '-', substr($key, 5));
                 $headers[$name] = $value;
-            } elseif (in_array($key, ['CONTENT_TYPE', 'CONTENT_LENGTH'])) {
+            } elseif (in_array($key, ['CONTENT_TYPE', 'CONTENT_LENGTH'], true)) {
                 $name = str_replace('_', '-', $key);
                 $headers[$name] = $value;
             }
@@ -128,13 +130,19 @@ class Request
         return '0.0.0.0';
     }
 
+
     /**
      * Get a query parameter
+     *
+     * @param string $key Parameter name
+     * @param mixed $default Default value if parameter not found
+     * @return mixed Parameter value
      */
-    public function query(string $key, $default = null)
+    public function query(string $key, mixed $default = null): mixed
     {
         return $this->queryParams[$key] ?? $default;
     }
+
 
     /**
      * Get all query parameters
@@ -146,8 +154,12 @@ class Request
 
     /**
      * Get a POST value
+     *
+     * @param string $key Parameter name
+     * @param mixed $default Default value if parameter not found
+     * @return mixed Parameter value
      */
-    public function post(string $key, $default = null)
+    public function post(string $key, mixed $default = null): mixed
     {
         return $this->postData[$key] ?? $default;
     }
@@ -162,24 +174,23 @@ class Request
 
     /**
      * Get request input (combines GET, POST and JSON body)
+     *
+     * @param string $key Parameter name
+     * @param mixed $default Default value if parameter not found
+     * @return mixed Parameter value
      */
-    public function input(string $key, $default = null)
+    public function input(string $key, mixed $default = null): mixed
     {
-        // Check POST data first
-        if (isset($this->postData[$key])) {
-            return $this->postData[$key];
-        }
+        // Check sources in priority order: POST, GET, JSON
+        $sources = [
+            $this->postData,
+            $this->queryParams,
+            $this->isJson() ? $this->getJsonBody() : []
+        ];
 
-        // Then check query parameters
-        if (isset($this->queryParams[$key])) {
-            return $this->queryParams[$key];
-        }
-
-        // Finally check JSON body if applicable
-        if ($this->isJson()) {
-            $data = $this->getJsonBody();
-            if (isset($data[$key])) {
-                return $data[$key];
+        foreach ($sources as $source) {
+            if (isset($source[$key])) {
+                return $source[$key];
             }
         }
 
@@ -199,6 +210,7 @@ class Request
 
         return $input;
     }
+
 
     /**
      * Get filtered input value
@@ -222,11 +234,13 @@ class Request
 
     /**
      * Get request body content
+     *
+     * @return string Raw request body
      */
     public function getBody(): string
     {
         if ($this->body === null) {
-            $this->body = file_get_contents('php://input');
+            $this->body = file_get_contents('php://input') ?: '';
         }
 
         return $this->body;
@@ -243,17 +257,24 @@ class Request
 
     /**
      * Get JSON decoded body
+     *
+     * @return array Decoded JSON data
      */
     public function getJsonBody(): array
     {
-        if (!$this->isJson()) {
-            return [];
+        static $jsonData = null;
+
+        if ($jsonData === null) {
+            if (!$this->isJson()) {
+                $jsonData = [];
+            } else {
+                $body = $this->getBody();
+                $data = json_decode($body, true);
+                $jsonData = is_array($data) ? $data : [];
+            }
         }
 
-        $body = $this->getBody();
-        $data = json_decode($body, true);
-
-        return $data ?: [];
+        return $jsonData;
     }
 
     /**

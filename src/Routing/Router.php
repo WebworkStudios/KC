@@ -1,9 +1,10 @@
 <?php
-<?php
-
+declare(strict_types=1);
 namespace Src\Routing;
 
 use Src\Config\AppConfig;
+use InvalidArgumentException;
+use RuntimeException;
 
 class Router
 {
@@ -13,14 +14,17 @@ class Router
     private ?string $fallbackHandler = null;
     private ?string $cacheFile = null;
     private bool $cacheEnabled = false;
+    private array $compiledRoutes = [];
 
     public function __construct(private AppConfig $config)
     {
         $this->cacheEnabled = $config->get('router.cache_enabled', false);
         $this->cacheFile = $config->get('router.cache_file');
 
-        if ($this->cacheEnabled && file_exists($this->cacheFile)) {
+        if ($this->cacheEnabled && $this->cacheFile && file_exists($this->cacheFile)) {
             $this->routes = require $this->cacheFile;
+            // Pre-compile routes after loading from cache
+            $this->preCompileRoutes();
         }
     }
 
@@ -78,10 +82,12 @@ class Router
             'parameters' => $this->extractParameters($uri)
         ];
 
-        $this->routes[] = $route;
+        $routeId = count($this->routes);
+        $this->routes[$routeId] = $route;
+        $this->compiledRoutes[$routeId] = $this->compileRoutePattern($uri);
 
         if ($name !== null) {
-            $this->namedRoutes[$name] = $route;
+            $this->namedRoutes[$name] = $routeId;
         }
 
         return $this;
@@ -144,43 +150,81 @@ class Router
      */
     public function getByName(string $name): ?array
     {
-        return $this->namedRoutes[$name] ?? null;
+        if (!isset($this->namedRoutes[$name])) {
+            return null;
+        }
+
+        $routeId = $this->namedRoutes[$name];
+        return $this->routes[$routeId] ?? null;
     }
 
     /**
      * Generate a URL for a named route
+     *
+     * @param string $name Route name
+     * @param array $parameters Parameters to substitute in the route
+     * @return string Generated URL
+     * @throws InvalidArgumentException If route name is not found
      */
     public function url(string $name, array $parameters = []): string
     {
         if (!isset($this->namedRoutes[$name])) {
-            throw new \InvalidArgumentException("Route with name '$name' not found");
+            throw new InvalidArgumentException("Route with name '$name' not found");
         }
 
-        $uri = $this->namedRoutes[$name]['uri'];
+        $routeId = $this->namedRoutes[$name];
+        $route = $this->routes[$routeId];
+        $uri = $route['uri'];
+        $requiredParams = array_keys($route['parameters']);
+
+        // Validate all required parameters are provided
+        foreach ($requiredParams as $param) {
+            if (!isset($parameters[$param])) {
+                throw new InvalidArgumentException("Missing required parameter '$param' for route '$name'");
+            }
+        }
 
         foreach ($parameters as $key => $value) {
-            $uri = str_replace("{{$key}}", $value, $uri);
+            $pattern = "{{$key}}";
+            if (str_contains($uri, $pattern)) {
+                $uri = str_replace($pattern, $value, $uri);
+            }
         }
 
         // Remove any remaining placeholders
         $uri = preg_replace('/{[^}]+}/', '', $uri);
 
-        return $uri;
+        return '/' . trim($uri, '/');
+    }
+
+    /**
+     * Pre-compile all route patterns for better performance
+     */
+    private function preCompileRoutes(): void
+    {
+        foreach ($this->routes as $id => $route) {
+            $this->compiledRoutes[$id] = $this->compileRoutePattern($route['uri']);
+        }
     }
 
     /**
      * Match the current request with a registered route
+     *
+     * @param string $method HTTP method
+     * @param string $uri Request URI
+     * @return array Matched route action and parameters
+     * @throws RuntimeException If no route matches
      */
     public function match(string $method, string $uri): array
     {
         $uri = trim($uri, '/');
 
-        foreach ($this->routes as $route) {
+        foreach ($this->routes as $id => $route) {
             if ($route['method'] !== $method && $route['method'] !== 'ANY') {
                 continue;
             }
 
-            $pattern = $this->compileRoutePattern($route['uri']);
+            $pattern = $this->compiledRoutes[$id] ?? $this->compileRoutePattern($route['uri']);
 
             if (preg_match($pattern, $uri, $matches)) {
                 $parameters = $this->extractMatchedParameters($route, $matches);
@@ -199,7 +243,7 @@ class Router
             ];
         }
 
-        throw new \RuntimeException("No route found for $method $uri");
+        throw new RuntimeException("No route found for $method $uri");
     }
 
     /**
@@ -246,6 +290,8 @@ class Router
 
     /**
      * Cache the current routes
+     *
+     * @return bool Success status
      */
     public function cacheRoutes(): bool
     {
@@ -260,6 +306,8 @@ class Router
 
     /**
      * Clear the route cache
+     *
+     * @return bool Success status
      */
     public function clearCache(): bool
     {
