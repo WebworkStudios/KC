@@ -1,10 +1,10 @@
 <?php
-
-
+declare(strict_types=1);
 namespace Src\Security;
 
 class CsrfProtection
 {
+    private Session $session;
     private string $tokenName;
     private int $tokenExpiration;
 
@@ -12,17 +12,14 @@ class CsrfProtection
      * Create a new CSRF protection instance
      */
     public function __construct(
+        Session $session,
         string $tokenName = 'csrf_token',
         int    $tokenExpiration = 7200 // 2 hours in seconds
     )
     {
+        $this->session = $session;
         $this->tokenName = $tokenName;
         $this->tokenExpiration = $tokenExpiration;
-
-        // Start session if not already started
-        if (session_status() === PHP_SESSION_NONE) {
-            session_start();
-        }
     }
 
     /**
@@ -33,10 +30,10 @@ class CsrfProtection
         $token = bin2hex(random_bytes(32));
         $expiration = time() + $this->tokenExpiration;
 
-        $_SESSION[$this->tokenName] = [
+        $this->session->set($this->tokenName, [
             'token' => $token,
             'expires' => $expiration
-        ];
+        ]);
 
         return $token;
     }
@@ -50,7 +47,8 @@ class CsrfProtection
             return $this->generateToken();
         }
 
-        return $_SESSION[$this->tokenName]['token'];
+        $tokenData = $this->session->get($this->tokenName);
+        return $tokenData['token'];
     }
 
     /**
@@ -58,15 +56,15 @@ class CsrfProtection
      */
     private function hasValidToken(): bool
     {
-        if (!isset($_SESSION[$this->tokenName]) ||
-            !isset($_SESSION[$this->tokenName]['token']) ||
-            !isset($_SESSION[$this->tokenName]['expires'])) {
+        $tokenData = $this->session->get($this->tokenName);
+
+        if (!is_array($tokenData) || !isset($tokenData['token']) || !isset($tokenData['expires'])) {
             return false;
         }
 
         // Check if token is expired
-        if ($_SESSION[$this->tokenName]['expires'] < time()) {
-            unset($_SESSION[$this->tokenName]);
+        if ($tokenData['expires'] < time()) {
+            $this->session->remove($this->tokenName);
             return false;
         }
 
@@ -82,7 +80,8 @@ class CsrfProtection
             return false;
         }
 
-        $valid = hash_equals($_SESSION[$this->tokenName]['token'], $token);
+        $tokenData = $this->session->get($this->tokenName);
+        $valid = hash_equals($tokenData['token'], $token);
 
         // Generate a new token after validation for next request
         if ($valid) {

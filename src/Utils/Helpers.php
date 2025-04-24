@@ -113,6 +113,8 @@ if (!function_exists('csrf_field')) {
     }
 }
 
+// In src/Utils/Helpers.php
+
 if (!function_exists('old')) {
     /**
      * Holt einen alten Eingabewert aus der Session
@@ -123,7 +125,7 @@ if (!function_exists('old')) {
      */
     function old(string $key, $default = null)
     {
-        return $_SESSION['_old_input'][$key] ?? $default;
+        return app(Src\Security\Session::class)->getOldInput($key, $default);
     }
 }
 
