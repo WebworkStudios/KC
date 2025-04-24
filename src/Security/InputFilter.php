@@ -11,7 +11,7 @@ class InputFilter
      * @param int $filter
      * @return mixed
      */
-    public function sanitize(mixed $value, int $filter = FILTER_SANITIZE_SPECIAL_CHARS)
+    public function sanitize(mixed $value, int $filter = FILTER_SANITIZE_SPECIAL_CHARS): mixed
     {
         if (is_array($value)) {
             return array_map(fn($item) => $this->sanitize($item, $filter), $value);
