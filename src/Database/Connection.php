@@ -27,6 +27,16 @@ class Connection
     private array $config;
 
     /**
+     * Cache für Prepared Statements
+     */
+    private array $statementCache = [];
+
+    /**
+     * Maximale Größe des Statement-Caches
+     */
+    private int $maxCacheSize = 100;
+
+    /**
      * Standardkonfiguration
      */
     private array $defaultConfig = [
@@ -81,7 +91,20 @@ class Connection
     public function query(string $query, array $params = []): PDOStatement
     {
         try {
-            $statement = $this->getPdo()->prepare($query);
+            // Versuchen, Statement aus Cache zu holen
+            $cacheKey = md5($query);
+
+            if (!isset($this->statementCache[$cacheKey])) {
+                // Cache-Größe prüfen und ggf. ältesten Eintrag entfernen
+                if (count($this->statementCache) >= $this->maxCacheSize) {
+                    array_shift($this->statementCache);
+                }
+
+                // Statement vorbereiten und cachen
+                $this->statementCache[$cacheKey] = $this->getPdo()->prepare($query);
+            }
+
+            $statement = $this->statementCache[$cacheKey];
             $statement->execute($params);
 
             return $statement;

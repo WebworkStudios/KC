@@ -36,11 +36,11 @@ class WhereClause
      */
     public function where(string $column, string $operator, mixed $value): void
     {
-        $this->addCondition('AND', $column, $operator, $value);
+        $this->addWhereCondition('AND', $column, $operator, $value);
     }
 
     /**
-     * Fügt eine Bedingung hinzu
+     * Fügt eine WHERE-Bedingung mit beliebigem Typ hinzu
      *
      * @param string $type Typ der Verknüpfung (AND oder OR)
      * @param string $column Spalte
@@ -80,7 +80,7 @@ class WhereClause
      */
     public function orWhere(string $column, string $operator, mixed $value): void
     {
-        $this->addCondition('OR', $column, $operator, $value);
+        $this->addWhereCondition('OR', $column, $operator, $value);
     }
 
     /**
@@ -125,6 +125,21 @@ class WhereClause
     {
         $this->addInCondition('OR', $column, $values, 'IN');
     }
+
+    /**
+     * Generische Methode für WHERE-Bedingungen
+     *
+     * @param string $type Verknüpfungstyp (AND/OR)
+     * @param string $column Spalte
+     * @param string $operator Operator
+     * @param mixed $value Wert
+     * @return void
+     */
+    private function addWhereCondition(string $type, string $column, string $operator, mixed $value): void
+    {
+        $this->addCondition($type, $column, $operator, $value);
+    }
+
 
     /**
      * Fügt eine IN-Bedingung hinzu

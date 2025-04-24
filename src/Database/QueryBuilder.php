@@ -23,6 +23,8 @@ use App\Core\Database\Exceptions\QueryException;
 {
     /**
      * Zu selektierende Spalten
+     *
+     * @var array<string>
      */
     private array $select = ['*'];
 
@@ -44,27 +46,27 @@ use App\Core\Database\Exceptions\QueryException;
     /**
      * JOIN-Klausel
      */
-    private JoinClause $joinClause;
+    private readonly JoinClause $joinClause;
 
     /**
      * GROUP BY-Klausel
      */
-    private GroupByClause $groupByClause;
+    private readonly GroupByClause $groupByClause;
 
     /**
      * HAVING-Klausel
      */
-    private HavingClause $havingClause;
+    private readonly HavingClause $havingClause;
 
     /**
      * ORDER BY-Klausel
      */
-    private OrderByClause $orderByClause;
+    private readonly OrderByClause $orderByClause;
 
     /**
      * LIMIT/OFFSET-Klausel
      */
-    private LimitOffsetClause $limitOffsetClause;
+    private readonly LimitOffsetClause $limitOffsetClause;
 
     /**
      * @var array<QueryBuilder> $unions
@@ -76,7 +78,15 @@ use App\Core\Database\Exceptions\QueryException;
      */
     private array $unionAll = [];
 
-    private array $connectionConfig;
+    /**
+     * Konfiguration der Datenbankverbindung
+     */
+    private readonly array $connectionConfig;
+
+    /**
+     * Flag für FOR UPDATE Klausel
+     */
+    private bool $forUpdate = false;
 
     /**
      * Konstruktor
@@ -92,12 +102,23 @@ use App\Core\Database\Exceptions\QueryException;
         // Hole die Verbindungskonfiguration von der Connection
         $this->connectionConfig = $connection->getConnectionConfig();
 
-        // Restlicher Konstruktor bleibt unverändert
+        // Klausel-Objekte initialisieren
         $this->joinClause = new JoinClause();
         $this->groupByClause = new GroupByClause();
         $this->havingClause = new HavingClause();
         $this->orderByClause = new OrderByClause();
         $this->limitOffsetClause = new LimitOffsetClause();
+    }
+
+    /**
+     * Erstellt einen rohen SQL-Ausdruck
+     *
+     * @param string $expression SQL-Ausdruck
+     * @return Expression
+     */
+    public function raw(string $expression): Expression
+    {
+        return new Expression($expression);
     }
 
     /**
@@ -138,9 +159,9 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function whereGroup(callable $callback): self
     {
-        $this->whereClause->beginGroup();
+        $this->getWhereClause()->beginGroup();
         $callback($this);
-        $this->whereClause->endGroup();
+        $this->getWhereClause()->endGroup();
         return $this;
     }
 
@@ -191,12 +212,16 @@ use App\Core\Database\Exceptions\QueryException;
      */
     private function sanitizeColumnName(string $column): string
     {
-        // Behandlung von Funktionen und Ausdrücken
+        // SQL-Funktionen direkt durchlassen
         if (str_contains($column, '(') && str_contains($column, ')')) {
-            return $column; // SQL-Funktionen direkt durchlassen
+            // Prüfen auf potenziell gefährliche Muster
+            if (preg_match('/(\s|;|--|\/\*|\*\/|@@|@|EXEC|EXECUTE|INSERT|UPDATE|DELETE|DROP|ALTER)/i', $column)) {
+                throw new \InvalidArgumentException("Potenziell gefährlicher Spaltenausdruck: '{$column}'");
+            }
+            return $column;
         }
 
-        // Unterstützung für Spalten mit Tabellen-Präfix (table.column)
+        // Unterstützung für Spalten mit Tabellen-Präfix
         if (str_contains($column, '.')) {
             $parts = explode('.', $column);
             $validatedParts = [];
@@ -205,7 +230,7 @@ use App\Core\Database\Exceptions\QueryException;
                 if ($part === '*') {
                     $validatedParts[] = $part;
                 } else {
-                    // Validieren des Spaltennamens mit einem strengeren Pattern
+                    // Strikter validieren
                     if (!preg_match('/^[a-zA-Z][a-zA-Z0-9_]*$/', $part)) {
                         throw new \InvalidArgumentException("Ungültiger Spaltenname: '{$part}' in '{$column}'");
                     }
@@ -257,7 +282,7 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function orWhere(string $column, string $operator, mixed $value): self
     {
-        $this->whereClause->orWhere($column, $operator, $value);
+        $this->getWhereClause()->orWhere($column, $operator, $value);
         return $this;
     }
 
@@ -270,7 +295,7 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function whereIn(string $column, array $values): self
     {
-        $this->whereClause->whereIn($column, $values);
+        $this->getWhereClause()->whereIn($column, $values);
         return $this;
     }
 
@@ -283,7 +308,7 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function orWhereIn(string $column, array $values): self
     {
-        $this->whereClause->orWhereIn($column, $values);
+        $this->getWhereClause()->orWhereIn($column, $values);
         return $this;
     }
 
@@ -296,7 +321,7 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function whereNotIn(string $column, array $values): self
     {
-        $this->whereClause->whereNotIn($column, $values);
+        $this->getWhereClause()->whereNotIn($column, $values);
         return $this;
     }
 
@@ -309,7 +334,7 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function orWhereNotIn(string $column, array $values): self
     {
-        $this->whereClause->orWhereNotIn($column, $values);
+        $this->getWhereClause()->orWhereNotIn($column, $values);
         return $this;
     }
 
@@ -321,7 +346,7 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function whereNull(string $column): self
     {
-        $this->whereClause->whereNull($column);
+        $this->getWhereClause()->whereNull($column);
         return $this;
     }
 
@@ -333,7 +358,7 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function orWhereNull(string $column): self
     {
-        $this->whereClause->orWhereNull($column);
+        $this->getWhereClause()->orWhereNull($column);
         return $this;
     }
 
@@ -345,7 +370,7 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function whereNotNull(string $column): self
     {
-        $this->whereClause->whereNotNull($column);
+        $this->getWhereClause()->whereNotNull($column);
         return $this;
     }
 
@@ -357,7 +382,7 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function orWhereNotNull(string $column): self
     {
-        $this->whereClause->orWhereNotNull($column);
+        $this->getWhereClause()->orWhereNotNull($column);
         return $this;
     }
 
@@ -371,7 +396,7 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function whereBetween(string $column, mixed $min, mixed $max): self
     {
-        $this->whereClause->whereBetween($column, $min, $max);
+        $this->getWhereClause()->whereBetween($column, $min, $max);
         return $this;
     }
 
@@ -385,8 +410,32 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function orWhereBetween(string $column, mixed $min, mixed $max): self
     {
-        $this->whereClause->orWhereBetween($column, $min, $max);
+        $this->getWhereClause()->orWhereBetween($column, $min, $max);
         return $this;
+    }
+
+    /**
+     * Überprüft und maskiert einen Tabellennamen
+     *
+     * @param string $table Tabellenname
+     * @return string Maskierter Tabellenname
+     * @throws \InvalidArgumentException wenn der Tabellenname ungültig ist
+     */
+    private function sanitizeTableName(string $table): string
+    {
+        // Unterstützung für Tabellennamen mit Schema/Datenbank (schema.table)
+        $parts = explode('.', $table);
+        $validatedParts = [];
+
+        foreach ($parts as $part) {
+            // Validieren mit einer strengeren Regel
+            if (!preg_match('/^[a-zA-Z][a-zA-Z0-9_]*$/', $part)) {
+                throw new \InvalidArgumentException("Ungültiger Tabellenname: '{$part}' in '{$table}'");
+            }
+            $validatedParts[] = $this->quoteIdentifier($part);
+        }
+
+        return implode('.', $validatedParts);
     }
 
     /**
@@ -426,30 +475,6 @@ use App\Core\Database\Exceptions\QueryException;
 
         $this->joinClause->join($sanitizedTable, $sanitizedFirst, $operator, $sanitizedSecond, $normalizedType);
         return $this;
-    }
-
-    /**
-     * Überprüft und maskiert einen Tabellennamen
-     *
-     * @param string $table Tabellenname
-     * @return string Maskierter Tabellenname
-     * @throws \InvalidArgumentException wenn der Tabellenname ungültig ist
-     */
-    private function sanitizeTableName(string $table): string
-    {
-        // Unterstützung für Tabellennamen mit Schema/Datenbank (schema.table)
-        $parts = explode('.', $table);
-        $validatedParts = [];
-
-        foreach ($parts as $part) {
-            // Validieren mit einer strengeren Regel
-            if (!preg_match('/^[a-zA-Z][a-zA-Z0-9_]*$/', $part)) {
-                throw new \InvalidArgumentException("Ungültiger Tabellenname: '{$part}' in '{$table}'");
-            }
-            $validatedParts[] = $this->quoteIdentifier($part);
-        }
-
-        return implode('.', $validatedParts);
     }
 
     /**
@@ -524,12 +549,22 @@ use App\Core\Database\Exceptions\QueryException;
     }
 
     /**
-     * Führt die Abfrage aus und gibt eine Paginator-Instanz zurück
+     * Führt eine Abfrage aus und gibt das Ergebnis paginiert zurück
      *
-     * @param int $page Seite
-     * @param int $perPage Einträge pro Seite
-     * @param string[]|null $columns Spalten
-     * @param string|null $baseUrl Basis-URL für Links
+     * Diese Methode führt die Abfrage aus und gibt eine Paginator-Instanz zurück.
+     * Sie berechnet automatisch die Gesamtanzahl der Ergebnisse und führt dann
+     * die eigentliche Abfrage mit LIMIT und OFFSET aus.
+     *
+     * Beispiel:
+     * ```php
+     * $paginator = $queryBuilder->paginate(2, 10);
+     * $items = $paginator->getItems();
+     * ```
+     *
+     * @param int $page Aktuelle Seitennummer (beginnend bei 1)
+     * @param int $perPage Anzahl der Einträge pro Seite
+     * @param string[]|null $columns Zu selektierende Spalten oder null für aktuelle Auswahl
+     * @param string|null $baseUrl Basis-URL für Paginierungs-Links
      * @return Paginator
      */
     public function paginate(int $page, int $perPage, ?array $columns = null, ?string $baseUrl = null): Paginator
@@ -592,7 +627,7 @@ use App\Core\Database\Exceptions\QueryException;
      * Führt die Abfrage aus und gibt das erste Ergebnis zurück
      *
      * @param string[]|null $columns Spalten
-     * @return array|false
+     * @return array<string, mixed>|false
      */
     public function first(?array $columns = null): array|false
     {
@@ -611,7 +646,7 @@ use App\Core\Database\Exceptions\QueryException;
      * Führt die Abfrage aus und gibt alle Ergebnisse zurück
      *
      * @param string[]|null $columns Spalten
-     * @return array
+     * @return array<int, array<string, mixed>>
      */
     public function get(?array $columns = null): array
     {
@@ -683,7 +718,7 @@ use App\Core\Database\Exceptions\QueryException;
         }
 
         // FOR UPDATE (am Ende der Abfrage hinzufügen)
-        if (isset($this->forUpdate) && $this->forUpdate === true) {
+        if ($this->forUpdate) {
             $query .= ' FOR UPDATE';
         }
 
@@ -693,7 +728,7 @@ use App\Core\Database\Exceptions\QueryException;
     /**
      * Gibt alle Parameter für die Abfrage zurück
      *
-     * @return array
+     * @return array<string, mixed>
      */
     public function getBindings(): array
     {
@@ -785,6 +820,7 @@ use App\Core\Database\Exceptions\QueryException;
     /**
      * @template T
      * @param class-string<T> $class
+     * @param string[]|null $columns
      * @return T|null
      */
     public function firstAs(string $class, ?array $columns = null): ?object
@@ -829,7 +865,7 @@ use App\Core\Database\Exceptions\QueryException;
     /**
      * Führt ein INSERT aus
      *
-     * @param array $data Daten
+     * @param array<string, mixed> $data Daten
      * @return int Letzte eingefügte ID
      * @throws QueryException
      */
@@ -850,6 +886,13 @@ use App\Core\Database\Exceptions\QueryException;
         return (int)$this->connection->getPdo()->lastInsertId();
     }
 
+    /**
+     * Führt eine SQL-Query aus
+     *
+     * @param string $query SQL-Query
+     * @param array<string, mixed> $params Parameter für die Query
+     * @return \PDOStatement
+     */
     public function query(string $query, array $params = []): \PDOStatement
     {
         return $this->connection->query($query, $params);
@@ -858,7 +901,7 @@ use App\Core\Database\Exceptions\QueryException;
     /**
      * Führt mehrere INSERTs aus
      *
-     * @param array $data Daten
+     * @param array<int, array<string, mixed>> $data Daten
      * @return bool
      */
     public function insertMany(array $data): bool
@@ -901,7 +944,7 @@ use App\Core\Database\Exceptions\QueryException;
     /**
      * Führt ein UPDATE aus
      *
-     * @param array $data Daten
+     * @param array<string, mixed> $data Daten
      * @return int Anzahl der geänderten Zeilen
      */
     public function update(array $data): int
@@ -912,17 +955,23 @@ use App\Core\Database\Exceptions\QueryException;
         $params = [];
 
         foreach ($data as $column => $value) {
-            $set[] = "$column = :update_$column";
-            $params["update_$column"] = $value;
+            if ($value instanceof Expression) {
+                $set[] = "$column = {$value->getValue()}";
+            } else {
+                $set[] = "$column = :update_$column";
+                $params["update_$column"] = $value;
+            }
         }
 
         $query .= implode(', ', $set);
 
         // WHERE-Klausel hinzufügen
-        $whereSql = $this->whereClause->toSql();
-        if ($whereSql) {
-            $query .= ' ' . $whereSql;
-            $params = array_merge($params, $this->whereClause->getBindings());
+        if ($this->whereClause !== null) {
+            $whereSql = $this->whereClause->toSql();
+            if ($whereSql) {
+                $query .= ' ' . $whereSql;
+                $params = array_merge($params, $this->whereClause->getBindings());
+            }
         }
 
         $statement = $this->connection->query($query, $params);
@@ -1030,7 +1079,7 @@ use App\Core\Database\Exceptions\QueryException;
             ->limit(1);
 
         // Kopieren aller relevanten Klauseln
-        if ($this->whereClause->hasConditions()) {
+        if ($this->whereClause !== null && $this->whereClause->hasConditions()) {
             $whereSql = $this->whereClause->toSql();
             $bindings = $this->whereClause->getBindings();
 
@@ -1080,7 +1129,7 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function whereSubQuery(string $column, string $operator, SubQueryBuilder $subQuery): self
     {
-        $this->whereClause->whereSubQuery($column, $operator, $subQuery);
+        $this->getWhereClause()->whereSubQuery($column, $operator, $subQuery);
         return $this;
     }
 
@@ -1094,7 +1143,7 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function orWhereSubQuery(string $column, string $operator, SubQueryBuilder $subQuery): self
     {
-        $this->whereClause->orWhereSubQuery($column, $operator, $subQuery);
+        $this->getWhereClause()->orWhereSubQuery($column, $operator, $subQuery);
         return $this;
     }
 
@@ -1148,9 +1197,9 @@ use App\Core\Database\Exceptions\QueryException;
      */
     public function orWhereGroup(callable $callback): self
     {
-        $this->whereClause->beginOrGroup();
+        $this->getWhereClause()->beginOrGroup();
         $callback($this);
-        $this->whereClause->endGroup();
+        $this->getWhereClause()->endGroup();
         return $this;
     }
 
@@ -1184,8 +1233,8 @@ use App\Core\Database\Exceptions\QueryException;
      * Führt ein UPDATE aus
      *
      * @param string $table Tabellenname
-     * @param array $data Daten
-     * @param array $conditions Bedingungen für WHERE-Klausel als Schlüssel-Wert-Paare
+     * @param array<string, mixed> $data Daten
+     * @param array<string, mixed> $conditions Bedingungen für WHERE-Klausel als Schlüssel-Wert-Paare
      * @return int Anzahl der geänderten Zeilen
      */
     public function updateWhere(string $table, array $data, array $conditions): int
@@ -1223,7 +1272,7 @@ use App\Core\Database\Exceptions\QueryException;
      * Führt ein DELETE aus
      *
      * @param string $table Tabellenname
-     * @param array $conditions Bedingungen für WHERE-Klausel als Schlüssel-Wert-Paare
+     * @param array<string, mixed> $conditions Bedingungen für WHERE-Klausel als Schlüssel-Wert-Paare
      * @return int Anzahl der gelöschten Zeilen
      */
     public function deleteWhere(string $table, array $conditions): int

@@ -40,6 +40,17 @@ class DatabaseManager
     private array $connectionLastUsed = [];
 
     /**
+     * Minimale Anzahl aktiver Verbindungen im Pool
+     */
+    private int $minConnections = 1;
+
+    /**
+     * Maximale Anzahl aktiver Verbindungen im Pool
+     */
+    private int $maxConnections = 10;
+
+
+    /**
      * Konstruktor
      *
      * @param array $configs Konfigurationen für Verbindungen
@@ -117,21 +128,29 @@ class DatabaseManager
         return $this->connection($connection)->transaction($callback);
     }
 
+
     /**
-     * Gibt eine Verbindung zurück und aktualisiert den Zeitstempel der letzten Nutzung
-     *
-     * @param string|null $name Name der Verbindung oder null für die Standardverbindung
-     * @return Connection
-     * @throws \Exception wenn die Verbindung nicht konfiguriert ist
+     * Gibt eine Verbindung zurück oder erstellt eine neue
      */
     public function connection(?string $name = null): Connection
     {
         $name = $name ?? $this->defaultConnection;
 
-        // Wenn die Verbindung nicht existiert, erstellen
+        // Verbindung erstellen, wenn nicht vorhanden
         if (!isset($this->connections[$name])) {
             if (!isset($this->configs[$name])) {
                 throw new \Exception("Datenbankverbindung '{$name}' ist nicht konfiguriert.");
+            }
+
+            // Prüfen, ob maximale Verbindungsanzahl erreicht ist
+            if (count($this->connections) >= $this->maxConnections) {
+                // Versuchen, eine inaktive Verbindung zu schließen
+                $this->pruneInactiveConnections();
+
+                // Falls immer noch zu viele Verbindungen, Exception werfen
+                if (count($this->connections) >= $this->maxConnections) {
+                    throw new \Exception("Maximale Anzahl an Datenbankverbindungen erreicht.");
+                }
             }
 
             $this->connections[$name] = new Connection($this->configs[$name]);
@@ -139,9 +158,6 @@ class DatabaseManager
 
         // Zeitstempel aktualisieren
         $this->connectionLastUsed[$name] = time();
-
-        // Inaktive Verbindungen überprüfen und ggf. schließen
-        $this->cleanInactiveConnections();
 
         return $this->connections[$name];
     }
@@ -189,9 +205,9 @@ class DatabaseManager
      * @param string|null $connection Die Verbindung oder null für die Standardverbindung
      * @return array Die Ergebnisse
      */
-    public function query(string $query, array $bindings = [], ?string $connection = null): array
+    public function query(string $query, array $params = [], ?string $connection = null): array
     {
-        return $this->connection($connection)->select($query, $bindings);
+        return $this->connection($connection)?->select($query, $params) ?? [];
     }
 
     /**
@@ -218,5 +234,30 @@ class DatabaseManager
     public function table(string $table, ?string $connection = null): QueryBuilder
     {
         return $this->connection($connection)->table($table);
+    }
+
+    /**
+     * Entfernt inaktive Verbindungen, um Ressourcen freizugeben
+     */
+    private function pruneInactiveConnections(): void
+    {
+        $now = time();
+        $totalClosed = 0;
+
+        // Nach alten Verbindungen suchen
+        foreach ($this->connectionLastUsed as $name => $lastUsed) {
+            // Nur schließen, wenn mehr als minimale Anzahl aktiver Verbindungen
+            if (count($this->connections) > $this->minConnections &&
+                $now - $lastUsed > $this->connectionTimeout) {
+
+                // Verbindung schließen
+                if (isset($this->connections[$name])) {
+                    $this->connections[$name]->disconnect();
+                    unset($this->connections[$name]);
+                    unset($this->connectionLastUsed[$name]);
+                    $totalClosed++;
+                }
+            }
+        }
     }
 }

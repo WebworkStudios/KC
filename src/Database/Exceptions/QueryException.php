@@ -9,22 +9,12 @@ use PDOException;
 /**
  * Exception, die geworfen wird, wenn eine SQL-Query fehlschlägt.
  */
-class QueryException extends \Exception
+class QueryException extends DatabaseException
 {
     /**
      * Die PDOException, die die ursprüngliche Fehlermeldung enthält.
      */
     private PDOException $pdoException;
-
-    /**
-     * Die SQL-Query, die den Fehler verursacht hat.
-     */
-    private string $query;
-
-    /**
-     * Die Parameter, die für die Query verwendet wurden.
-     */
-    private array $params;
 
     /**
      * Konstruktor
@@ -43,10 +33,8 @@ class QueryException extends \Exception
         array        $params = []
     )
     {
-        parent::__construct($message, $code, $pdoException);
+        parent::__construct($message, $code, $pdoException, $query, $params);
         $this->pdoException = $pdoException;
-        $this->query = $query;
-        $this->params = $params;
     }
 
     /**
@@ -57,25 +45,5 @@ class QueryException extends \Exception
     public function getPdoException(): PDOException
     {
         return $this->pdoException;
-    }
-
-    /**
-     * Gibt die SQL-Query zurück, die den Fehler verursacht hat
-     *
-     * @return string
-     */
-    public function getQuery(): string
-    {
-        return $this->query;
-    }
-
-    /**
-     * Gibt die Parameter zurück, die für die Query verwendet wurden
-     *
-     * @return array
-     */
-    public function getParams(): array
-    {
-        return $this->params;
     }
 }
