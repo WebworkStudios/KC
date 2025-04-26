@@ -33,6 +33,7 @@ $container = new Src\Container\Container();
 
 // Request erstellen
 $request = Src\Http\Request::fromGlobals();
+
 // Router initialisieren
 try {
     $router = new Src\Http\Router($container);
@@ -46,6 +47,9 @@ try {
     // Actions registrieren
     $router->registerActionsFromDirectory('App\\Actions', $actionsDir);
 
+    // HelloWorldAction für den Anfang manuell registrieren
+    $router->registerAction('App\\Actions\\HelloWorldAction');
+
     // Request dispatchen
     $response = $router->dispatch($request);
 
@@ -53,7 +57,7 @@ try {
     if ($response === null) {
         $response = new Src\Http\Response('Not Found', 404);
     }
-} catch (\Throwable $e) {
+} catch (Throwable $e) {
     // Fehlerseite für Entwicklungsumgebung
     if (defined('DEBUG') && DEBUG) {
         $response = new Src\Http\Response(
@@ -68,4 +72,13 @@ try {
 
     // Fehler loggen
     error_log($e->getMessage() . "\n" . $e->getTraceAsString());
+}
+
+// WICHTIG: Response an Client senden
+$response->send();
+
+// Performance-Messung für Entwicklung
+if (DEBUG) {
+    $executionTime = microtime(true) - $startTime;
+    error_log("Ausführungszeit: " . number_format($executionTime * 1000, 2) . " ms");
 }

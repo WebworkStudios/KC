@@ -28,6 +28,19 @@ class Response
     }
 
     /**
+     * Setzt einen HTTP-Header
+     *
+     * @param string $name Header-Name
+     * @param string $value Header-Wert
+     * @return self
+     */
+    public function setHeader(string $name, string $value): self
+    {
+        $this->headers[$name] = $value;
+        return $this;
+    }
+
+    /**
      * Erstellt eine JSON-Response
      *
      * @param mixed $data Zu serialisierende Daten
@@ -55,19 +68,6 @@ class Response
         $response = new self('', $status);
         $response->setHeader('Location', $url);
         return $response;
-    }
-
-    /**
-     * Setzt einen HTTP-Header
-     *
-     * @param string $name Header-Name
-     * @param string $value Header-Wert
-     * @return self
-     */
-    public function setHeader(string $name, string $value): self
-    {
-        $this->headers[$name] = $value;
-        return $this;
     }
 
     /**

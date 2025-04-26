@@ -3,11 +3,13 @@
 
 namespace Src\Http;
 
-use ReflectionClass;
-use ReflectionMethod;
-use Src\Container\Container;
+use Exception;
 use InvalidArgumentException;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
+use ReflectionClass;
 use RuntimeException;
+use Src\Container\Container;
 
 /**
  * Router-Klasse für das Routing von HTTP-Anfragen zu Action-Klassen
@@ -46,19 +48,28 @@ class Router
             if (DEBUG) {
                 echo "Warnung: Actions-Verzeichnis nicht gefunden: {$directory}";
             }
-            return $this;  // Elegant fehlschlagen statt Exception
+            return $this;
         }
 
         try {
-            $directoryIterator = new \RecursiveDirectoryIterator($directory);
-            $iterator = new \RecursiveIteratorIterator($directoryIterator);
+            $directoryIterator = new RecursiveDirectoryIterator($directory);
+            $iterator = new RecursiveIteratorIterator($directoryIterator);
 
-            // Rest des Codes...
-        } catch (\Exception $e) {
+            foreach ($iterator as $file) {
+                if ($file->isFile() && $file->getExtension() === 'php') {
+                    $relativeFilePath = substr($file->getPathname(), strlen($directory) + 1);
+                    $relativeFilePath = str_replace(['/', '\\'], '\\', $relativeFilePath);
+                    $className = $namespace . '\\' . substr($relativeFilePath, 0, -4); // Entferne .php
+
+                    if (class_exists($className)) {
+                        $this->registerAction($className);
+                    }
+                }
+            }
+        } catch (Exception $e) {
             if (DEBUG) {
                 echo "Fehler beim Durchsuchen des Actions-Verzeichnisses: " . $e->getMessage();
             }
-            // Elegant fehlschlagen
             return $this;
         }
 
@@ -152,6 +163,18 @@ class Router
     }
 
     /**
+     * Normalisiert einen Pfad (entfernt Trailing Slashes, etc.)
+     *
+     * @param string $path Zu normalisierender Pfad
+     * @return string Normalisierter Pfad
+     */
+    private function normalizePath(string $path): string
+    {
+        $path = '/' . trim($path, '/');
+        return $path === '/' ? $path : rtrim($path, '/');
+    }
+
+    /**
      * Führt eine Action aus und gibt die Response zurück
      *
      * @param array $routeData Route-Daten [action, name, middleware]
@@ -210,18 +233,6 @@ class Router
         }
 
         return null;
-    }
-
-    /**
-     * Normalisiert einen Pfad (entfernt Trailing Slashes, etc.)
-     *
-     * @param string $path Zu normalisierender Pfad
-     * @return string Normalisierter Pfad
-     */
-    private function normalizePath(string $path): string
-    {
-        $path = '/' . trim($path, '/');
-        return $path === '/' ? $path : rtrim($path, '/');
     }
 
     /**

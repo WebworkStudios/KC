@@ -1,6 +1,7 @@
 # Dependency Injection Container für PHP 8.4
 
-Diese Implementierung bietet einen leistungsstarken, modernen Dependency Injection Container mit Service-Registry, Auto-Wiring und Property Hooks für PHP 8.4.
+Diese Implementierung bietet einen leistungsstarken, modernen Dependency Injection Container mit Service-Registry,
+Auto-Wiring und Property Hooks für PHP 8.4.
 
 ## Funktionen
 
@@ -169,6 +170,7 @@ $container->updateProperty($configManager, 'environment', 'production');
 ## Beispiele
 
 Ausführliche Beispiele finden Sie in den beigefügten Beispieldateien:
+
 - `usage-example.php`: Allgemeine Verwendung des Containers
 - `unit-tests.php`: Detaillierte Tests und Anwendungsbeispiele
 

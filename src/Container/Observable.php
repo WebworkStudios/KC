@@ -2,10 +2,12 @@
 
 namespace Src\Container;
 
+use Attribute;
+
 /**
  * Attribut zum Markieren von Properties, die überwacht werden sollen
  */
-#[\Attribute(\Attribute::TARGET_PROPERTY)]
+#[Attribute(Attribute::TARGET_PROPERTY)]
 class Observable
 {
     /**

@@ -21,6 +21,7 @@ use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionParameter;
 use RuntimeException;
+use Throwable;
 use WeakMap;
 
 /**
@@ -72,80 +73,6 @@ class Container
         }
 
         return $this;
-    }
-
-    /**
-     * Bindet ein Interface an eine konkrete Implementierung
-     *
-     * @param string $interface Interface-Name
-     * @param string $implementation Implementierungs-Klassenname
-     * @return self
-     */
-    public function bind(string $interface, string $implementation): self
-    {
-        $this->bindings[$interface] = $implementation;
-        return $this;
-    }
-
-    /**
-     * Setzt Parameter für einen Service
-     *
-     * @param string $id Service-ID
-     * @param array $parameters Parameter als assoziatives Array
-     * @return self
-     */
-    public function setParameters(string $id, array $parameters): self
-    {
-        $this->parameters[$id] = $parameters;
-        return $this;
-    }
-
-    /**
-     * Holt einen Service aus dem Container
-     *
-     * @param string $id Service-ID
-     * @return object Die Service-Instanz
-     * @throws InvalidArgumentException Wenn der Service nicht gefunden wurde
-     */
-    public function get(string $id): object
-    {
-        // Prüfen ob Interface auf Implementierung gemappt ist
-        if (isset($this->bindings[$id])) {
-            $id = $this->bindings[$id];
-        }
-
-        // Prüfen ob Service bereits existiert
-        if (isset($this->services[$id])) {
-            $service = $this->services[$id];
-
-            // Falls es eine Factory ist, ausführen und Ergebnis cachen
-            if ($service instanceof Closure) {
-                $service = $service();
-                $this->services[$id] = $service;
-            }
-
-            return $service;
-        }
-
-        // Versuchen, den Service automatisch zu erstellen
-        if (class_exists($id)) {
-            $instance = $this->createInstance($id);
-            $this->services[$id] = $instance;
-            return $instance;
-        }
-
-        throw new InvalidArgumentException("Service nicht gefunden: $id");
-    }
-
-    /**
-     * Überprüft, ob ein Service im Container registriert ist
-     *
-     * @param string $id Service-ID
-     * @return bool
-     */
-    public function has(string $id): bool
-    {
-        return isset($this->services[$id]) || isset($this->bindings[$id]) || class_exists($id);
     }
 
     /**
@@ -229,7 +156,7 @@ class Container
             if ($this->has($typeName)) {
                 try {
                     return $this->get($typeName);
-                } catch (\Throwable $e) {
+                } catch (Throwable $e) {
                     // Falls Abhängigkeit nicht aufgelöst werden kann, weitermachen mit anderen Strategien
                 }
             }
@@ -249,6 +176,54 @@ class Container
         throw new RuntimeException(
             "Konnte Parameter '$paramName' für Klasse '$className' nicht auflösen"
         );
+    }
+
+    /**
+     * Überprüft, ob ein Service im Container registriert ist
+     *
+     * @param string $id Service-ID
+     * @return bool
+     */
+    public function has(string $id): bool
+    {
+        return isset($this->services[$id]) || isset($this->bindings[$id]) || class_exists($id);
+    }
+
+    /**
+     * Holt einen Service aus dem Container
+     *
+     * @param string $id Service-ID
+     * @return object Die Service-Instanz
+     * @throws InvalidArgumentException Wenn der Service nicht gefunden wurde
+     */
+    public function get(string $id): object
+    {
+        // Prüfen ob Interface auf Implementierung gemappt ist
+        if (isset($this->bindings[$id])) {
+            $id = $this->bindings[$id];
+        }
+
+        // Prüfen ob Service bereits existiert
+        if (isset($this->services[$id])) {
+            $service = $this->services[$id];
+
+            // Falls es eine Factory ist, ausführen und Ergebnis cachen
+            if ($service instanceof Closure) {
+                $service = $service();
+                $this->services[$id] = $service;
+            }
+
+            return $service;
+        }
+
+        // Versuchen, den Service automatisch zu erstellen
+        if (class_exists($id)) {
+            $instance = $this->createInstance($id);
+            $this->services[$id] = $instance;
+            return $instance;
+        }
+
+        throw new InvalidArgumentException("Service nicht gefunden: $id");
     }
 
     /**
@@ -389,6 +364,32 @@ class Container
         };
 
         $this->propertyProxies[$instance] = $proxy;
+    }
+
+    /**
+     * Bindet ein Interface an eine konkrete Implementierung
+     *
+     * @param string $interface Interface-Name
+     * @param string $implementation Implementierungs-Klassenname
+     * @return self
+     */
+    public function bind(string $interface, string $implementation): self
+    {
+        $this->bindings[$interface] = $implementation;
+        return $this;
+    }
+
+    /**
+     * Setzt Parameter für einen Service
+     *
+     * @param string $id Service-ID
+     * @param array $parameters Parameter als assoziatives Array
+     * @return self
+     */
+    public function setParameters(string $id, array $parameters): self
+    {
+        $this->parameters[$id] = $parameters;
+        return $this;
     }
 
     /**
