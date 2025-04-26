@@ -58,7 +58,7 @@ class Container
      * @param object|Closure|string|null $service Service-Instanz, Factory oder Klassenname
      * @return self
      */
-    public function register(string $id, object|Closure|string|null $service = null): self
+    public function register(string $id, object|string|null $service = null): self
     {
         if ($service === null) {
             $service = $id;
