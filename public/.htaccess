@@ -1,0 +1,57 @@
+# Aktiviert die Rewrite-Engine
+RewriteEngine On
+
+# Basisverzeichnis für die Rewrites setzen (falls in einem Unterverzeichnis)
+# Wenn dein Projekt in einem Unterverzeichnis von XAMPP installiert ist,
+# entferne den Kommentar bei der folgenden Zeile und passe den Pfad an
+# RewriteBase /mein-projekt/
+
+# Echte Dateien und Verzeichnisse nicht umleiten
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Alle Anfragen an index.php weiterleiten
+RewriteRule ^(.*)$ index.php [QSA,L]
+
+# PHP-Einstellungen angepasst für XAMPP Entwicklungsumgebung
+<IfModule mod_php.c>
+    # Fehleranzeige für Entwicklungsumgebung aktivieren
+    php_value display_errors On
+    php_value display_startup_errors On
+    php_value error_reporting E_ALL
+
+    # Ressourcenlimits für Entwicklung
+    php_value max_execution_time 120
+    php_value memory_limit 256M
+    php_value post_max_size 64M
+    php_value upload_max_filesize 32M
+
+    # Session-Einstellungen für lokale Entwicklung
+    # Cookie_secure auf Off für HTTP-Verbindungen in der Entwicklung
+    php_flag session.cookie_httponly On
+    php_flag session.use_only_cookies On
+    php_flag session.use_strict_mode On
+    php_flag session.cookie_secure Off
+</IfModule>
+
+# Kompression aktivieren
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/css application/javascript application/json
+</IfModule>
+
+# Für die Entwicklung auf XAMPP:
+# Deaktiviere den Browser-Cache, um Änderungen sofort zu sehen
+<IfModule mod_headers.c>
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires 0
+
+    # Basis-Sicherheitsheader
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-XSS-Protection "1; mode=block"
+</IfModule>
+
+# Verhindern, dass .htaccess-Datei direkt aufgerufen werden kann
+<Files .htaccess>
+    Require all denied
+</Files>
