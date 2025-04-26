@@ -34,7 +34,8 @@ class LoggerFactory
     public function __construct(
         string $logDir = '',
         string $defaultLevel = 'debug'
-    ) {
+    )
+    {
         // Standard-Log-Verzeichnis setzen
         if (empty($logDir)) {
             if (defined('BASE_PATH')) {
@@ -80,33 +81,6 @@ class LoggerFactory
     }
 
     /**
-     * Erstellt einen Standard-Logger basierend auf der Umgebung
-     *
-     * @param string $environment Umgebung ('development', 'production', etc.)
-     * @param array $config Konfiguration für den Logger
-     * @return LoggerInterface Logger-Instanz
-     */
-    public function createDefaultLogger(string $environment = 'development', array $config = []): LoggerInterface
-    {
-        // In Entwicklungsumgebung: Console + File
-        // In Produktionsumgebung: File + Syslog
-        $aggregate = new AggregateLogger();
-
-        if ($environment === 'development') {
-            $aggregate->addLogger($this->createFileLogger(array_merge($config, [
-                'filename' => 'app.log',
-            ])));
-        } else {
-            $aggregate->addLogger($this->createFileLogger(array_merge($config, [
-                'filename' => 'app.log',
-            ])));
-            $aggregate->addLogger($this->createSyslogLogger($config));
-        }
-
-        return $aggregate;
-    }
-
-    /**
      * Erstellt einen FileLogger
      *
      * @param array $config Konfiguration für den Logger
@@ -137,6 +111,33 @@ class LoggerFactory
         $level = $config['level'] ?? $this->defaultLevel;
 
         return new SyslogLogger($ident, $facility, $level);
+    }
+
+    /**
+     * Erstellt einen Standard-Logger basierend auf der Umgebung
+     *
+     * @param string $environment Umgebung ('development', 'production', etc.)
+     * @param array $config Konfiguration für den Logger
+     * @return LoggerInterface Logger-Instanz
+     */
+    public function createDefaultLogger(string $environment = 'development', array $config = []): LoggerInterface
+    {
+        // In Entwicklungsumgebung: Console + File
+        // In Produktionsumgebung: File + Syslog
+        $aggregate = new AggregateLogger();
+
+        if ($environment === 'development') {
+            $aggregate->addLogger($this->createFileLogger(array_merge($config, [
+                'filename' => 'app.log',
+            ])));
+        } else {
+            $aggregate->addLogger($this->createFileLogger(array_merge($config, [
+                'filename' => 'app.log',
+            ])));
+            $aggregate->addLogger($this->createSyslogLogger($config));
+        }
+
+        return $aggregate;
     }
 
     /**

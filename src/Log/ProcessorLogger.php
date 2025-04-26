@@ -2,6 +2,8 @@
 
 namespace Src\Log;
 
+use RuntimeException;
+
 /**
  * Logger, der Log-Prozessoren unterstützt
  *
@@ -49,6 +51,28 @@ class ProcessorLogger implements LoggerInterface
     public function emergency(string $message, array $context = []): void
     {
         $this->log('emergency', $message, $context);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function log(string $level, string $message, array $context = []): void
+    {
+        // Prozessoren ausführen
+        $processedContext = $context;
+
+        foreach ($this->processors as $processor) {
+            $processedContext = $processor($level, $message, $processedContext);
+
+            if (!is_array($processedContext)) {
+                throw new RuntimeException(
+                    "Prozessor muss ein Array zurückgeben, " . gettype($processedContext) . " erhalten"
+                );
+            }
+        }
+
+        // An Ziel-Logger weiterleiten
+        $this->logger->log($level, $message, $processedContext);
     }
 
     /**
@@ -105,27 +129,5 @@ class ProcessorLogger implements LoggerInterface
     public function debug(string $message, array $context = []): void
     {
         $this->log('debug', $message, $context);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function log(string $level, string $message, array $context = []): void
-    {
-        // Prozessoren ausführen
-        $processedContext = $context;
-
-        foreach ($this->processors as $processor) {
-            $processedContext = $processor($level, $message, $processedContext);
-
-            if (!is_array($processedContext)) {
-                throw new \RuntimeException(
-                    "Prozessor muss ein Array zurückgeben, " . gettype($processedContext) . " erhalten"
-                );
-            }
-        }
-
-        // An Ziel-Logger weiterleiten
-        $this->logger->log($level, $message, $processedContext);
     }
 }

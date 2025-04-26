@@ -3,6 +3,8 @@
 
 namespace Src\Log;
 
+use Throwable;
+
 /**
  * Hilfsklasse zum Protokollieren von Exceptions
  */
@@ -12,7 +14,7 @@ class LogException
      * Protokolliert eine Exception mit detaillierten Informationen
      *
      * @param LoggerInterface $logger Logger für die Ausgabe
-     * @param \Throwable $exception Die zu protokollierende Exception
+     * @param Throwable $exception Die zu protokollierende Exception
      * @param string $level Log-Level (error, critical, alert, emergency)
      * @param string $message Optionale Nachricht vor den Exception-Details
      * @param array $context Zusätzlicher Kontext für die Logeinträge
@@ -20,7 +22,7 @@ class LogException
      */
     public static function log(
         LoggerInterface $logger,
-        \Throwable      $exception,
+        Throwable      $exception,
         string          $level = 'error',
         string          $message = '',
         array           $context = []

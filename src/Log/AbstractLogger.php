@@ -2,6 +2,8 @@
 
 namespace Src\Log;
 
+use InvalidArgumentException;
+
 /**
  * Abstrakte Basis-Implementierung eines Loggers
  *
@@ -23,6 +25,29 @@ abstract class AbstractLogger implements LoggerInterface
     ];
 
     /**
+     * {@inheritDoc}
+     */
+    public function emergency(string $message, array $context = []): void
+    {
+        $this->log('emergency', $message, $context);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function log(string $level, string $message, array $context = []): void
+    {
+        // Prüfen ob Log-Level gültig ist
+        if (!in_array($level, self::LEVELS, true)) {
+            throw new InvalidArgumentException(
+                "Ungültiges Log-Level: $level. Erlaubte Levels sind: " . implode(', ', self::LEVELS)
+            );
+        }
+
+        $this->doLog($level, $message, $context);
+    }
+
+    /**
      * Führt das eigentliche Logging aus
      *
      * Diese Methode muss von konkreten Logger-Implementierungen überschrieben werden
@@ -33,14 +58,6 @@ abstract class AbstractLogger implements LoggerInterface
      * @return void
      */
     abstract protected function doLog(string $level, string $message, array $context = []): void;
-
-    /**
-     * {@inheritDoc}
-     */
-    public function emergency(string $message, array $context = []): void
-    {
-        $this->log('emergency', $message, $context);
-    }
 
     /**
      * {@inheritDoc}
@@ -96,21 +113,6 @@ abstract class AbstractLogger implements LoggerInterface
     public function debug(string $message, array $context = []): void
     {
         $this->log('debug', $message, $context);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function log(string $level, string $message, array $context = []): void
-    {
-        // Prüfen ob Log-Level gültig ist
-        if (!in_array($level, self::LEVELS, true)) {
-            throw new \InvalidArgumentException(
-                "Ungültiges Log-Level: $level. Erlaubte Levels sind: " . implode(', ', self::LEVELS)
-            );
-        }
-
-        $this->doLog($level, $message, $context);
     }
 
     /**

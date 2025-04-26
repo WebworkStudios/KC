@@ -2,6 +2,8 @@
 
 namespace Src\Log;
 
+use Throwable;
+
 /**
  * Logger, der Logeinträge an mehrere Logger weiterleitet
  *
@@ -42,6 +44,21 @@ class AggregateLogger implements LoggerInterface
     public function emergency(string $message, array $context = []): void
     {
         $this->log('emergency', $message, $context);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function log(string $level, string $message, array $context = []): void
+    {
+        foreach ($this->loggers as $logger) {
+            try {
+                $logger->log($level, $message, $context);
+            } catch (Throwable $e) {
+                // Fehler im Logger nicht nach oben propagieren
+                error_log('Fehler beim Logging: ' . $e->getMessage());
+            }
+        }
     }
 
     /**
@@ -98,20 +115,5 @@ class AggregateLogger implements LoggerInterface
     public function debug(string $message, array $context = []): void
     {
         $this->log('debug', $message, $context);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function log(string $level, string $message, array $context = []): void
-    {
-        foreach ($this->loggers as $logger) {
-            try {
-                $logger->log($level, $message, $context);
-            } catch (\Throwable $e) {
-                // Fehler im Logger nicht nach oben propagieren
-                error_log('Fehler beim Logging: ' . $e->getMessage());
-            }
-        }
     }
 }

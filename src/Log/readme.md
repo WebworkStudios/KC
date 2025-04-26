@@ -1,6 +1,7 @@
 # Logger System für PHP 8.4 ADR Framework
 
-Das Logger-System bietet eine leistungsstarke und flexible Lösung zum Protokollieren von Nachrichten und Ereignissen in Ihrer Anwendung. Es basiert auf dem Interface-Design-Pattern und ist vollständig typensicher mit PHP 8.4.
+Das Logger-System bietet eine leistungsstarke und flexible Lösung zum Protokollieren von Nachrichten und Ereignissen in
+Ihrer Anwendung. Es basiert auf dem Interface-Design-Pattern und ist vollständig typensicher mit PHP 8.4.
 
 ## Hauptmerkmale
 
@@ -84,6 +85,7 @@ $fileLogger = new Src\Log\FileLogger(
     'a'                       // Dateimodus (a = append, w = überschreiben)
 );
 ```
+
 ### SyslogLogger
 
 Schreibt Logs in das Systemlog (syslog) mit entsprechenden Prioritäten.
@@ -184,7 +186,8 @@ $response = $loggingMiddleware->process($request, function($request) {
 ## Tipps für optimales Logging
 
 1. **Strukturiertes Logging verwenden**: Immer Kontext-Daten übergeben statt alles in die Nachricht zu packen
-2. **Sinnvolle Log-Levels wählen**: Wichtige Fehler als error/critical, Warnungen als warning, Informationen als info, Details als debug
+2. **Sinnvolle Log-Levels wählen**: Wichtige Fehler als error/critical, Warnungen als warning, Informationen als info,
+   Details als debug
 3. **Platzhalter nutzen**: Mit `{key}` in der Nachricht und entsprechenden Werten im Kontext
 4. **Performance beachten**: Teure Berechnungen für Logs nur ausführen, wenn der entsprechende Log-Level aktiv ist
 5. **In Produktionsumgebung**: Log-Level auf info oder höher setzen, um Performance zu optimieren

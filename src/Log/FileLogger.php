@@ -3,8 +3,9 @@
 
 namespace Src\Log;
 
-use DateTimeInterface;
 use DateTimeImmutable;
+use DateTimeInterface;
+use InvalidArgumentException;
 use RuntimeException;
 
 /**
@@ -12,12 +13,6 @@ use RuntimeException;
  */
 class FileLogger extends AbstractLogger
 {
-    /** @var string Minimales Log-Level, das protokolliert wird */
-    private string $minLevel;
-
-    /** @var resource|null Datei-Handle */
-    private $fileHandle = null;
-
     /** @var array Level-Prioritäten (niedrigere Zahl = höhere Priorität) */
     private const LEVEL_PRIORITIES = [
         'emergency' => 0,
@@ -29,6 +24,10 @@ class FileLogger extends AbstractLogger
         'info' => 6,
         'debug' => 7
     ];
+    /** @var string Minimales Log-Level, das protokolliert wird */
+    private string $minLevel;
+    /** @var resource|null Datei-Handle */
+    private $fileHandle = null;
 
     /**
      * Erstellt einen neuen FileLogger
@@ -45,7 +44,7 @@ class FileLogger extends AbstractLogger
     )
     {
         if (!in_array($minLevel, self::LEVELS, true)) {
-            throw new \InvalidArgumentException("Ungültiges Log-Level: $minLevel");
+            throw new InvalidArgumentException("Ungültiges Log-Level: $minLevel");
         }
 
         $this->minLevel = $minLevel;

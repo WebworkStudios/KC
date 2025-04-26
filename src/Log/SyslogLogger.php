@@ -2,29 +2,24 @@
 
 namespace Src\Log;
 
+use InvalidArgumentException;
+
 /**
  * Logger, der in das Systemlog schreibt (syslog)
  */
 class SyslogLogger extends AbstractLogger
 {
-    /** @var string Minimales Log-Level, das protokolliert wird */
-    private string $minLevel;
-
-    /** @var bool Flag, ob Logger bereits geöffnet ist */
-    private bool $opened = false;
-
     /** @var array Mapping von Log-Levels auf Syslog-Prioritäten */
     private const LEVEL_PRIORITY_MAP = [
         'emergency' => LOG_EMERG,
-        'alert'     => LOG_ALERT,
-        'critical'  => LOG_CRIT,
-        'error'     => LOG_ERR,
-        'warning'   => LOG_WARNING,
-        'notice'    => LOG_NOTICE,
-        'info'      => LOG_INFO,
-        'debug'     => LOG_DEBUG
+        'alert' => LOG_ALERT,
+        'critical' => LOG_CRIT,
+        'error' => LOG_ERR,
+        'warning' => LOG_WARNING,
+        'notice' => LOG_NOTICE,
+        'info' => LOG_INFO,
+        'debug' => LOG_DEBUG
     ];
-
     /** @var array Level-Prioritäten (niedrigere Zahl = höhere Priorität) */
     private const LEVEL_PRIORITIES = [
         'emergency' => 0,
@@ -36,6 +31,10 @@ class SyslogLogger extends AbstractLogger
         'info' => 6,
         'debug' => 7
     ];
+    /** @var string Minimales Log-Level, das protokolliert wird */
+    private string $minLevel;
+    /** @var bool Flag, ob Logger bereits geöffnet ist */
+    private bool $opened = false;
 
     /**
      * Erstellt einen neuen SyslogLogger
@@ -46,11 +45,12 @@ class SyslogLogger extends AbstractLogger
      */
     public function __construct(
         private readonly string $ident = 'php',
-        private readonly int $facility = LOG_USER,
-        string $minLevel = 'debug'
-    ) {
+        private readonly int    $facility = LOG_USER,
+        string                  $minLevel = 'debug'
+    )
+    {
         if (!in_array($minLevel, self::LEVELS, true)) {
-            throw new \InvalidArgumentException("Ungültiges Log-Level: $minLevel");
+            throw new InvalidArgumentException("Ungültiges Log-Level: $minLevel");
         }
 
         $this->minLevel = $minLevel;

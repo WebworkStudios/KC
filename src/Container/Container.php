@@ -22,10 +22,10 @@ use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionParameter;
 use RuntimeException;
-use Throwable;
-use WeakMap;
 use Src\Log\LoggerInterface;
 use Src\Log\NullLogger;
+use Throwable;
+use WeakMap;
 
 /**
  * Hauptklasse des Dependency Injection Containers

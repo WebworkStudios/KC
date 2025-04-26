@@ -4,18 +4,13 @@ namespace Src\Log;
 
 use DateTimeImmutable;
 use DateTimeInterface;
+use InvalidArgumentException;
 
 /**
  * Logger speziell für Debug-Zwecke mit Details über die Aufrufstelle
  */
 class DebugLogger extends AbstractLogger
 {
-    /** @var string Minimales Log-Level, das protokolliert wird */
-    private string $minLevel;
-
-    /** @var array<LoggerInterface> Ziel-Logger für Debug-Ausgaben */
-    private array $targetLoggers;
-
     /** @var array Level-Prioritäten (niedrigere Zahl = höhere Priorität) */
     private const LEVEL_PRIORITIES = [
         'emergency' => 0,
@@ -27,6 +22,10 @@ class DebugLogger extends AbstractLogger
         'info' => 6,
         'debug' => 7
     ];
+    /** @var string Minimales Log-Level, das protokolliert wird */
+    private string $minLevel;
+    /** @var array<LoggerInterface> Ziel-Logger für Debug-Ausgaben */
+    private array $targetLoggers;
 
     /**
      * Erstellt einen neuen DebugLogger
@@ -36,10 +35,11 @@ class DebugLogger extends AbstractLogger
      */
     public function __construct(
         LoggerInterface|array $targetLoggers = [],
-        string $minLevel = 'debug'
-    ) {
+        string                $minLevel = 'debug'
+    )
+    {
         if (!in_array($minLevel, self::LEVELS, true)) {
-            throw new \InvalidArgumentException("Ungültiges Log-Level: $minLevel");
+            throw new InvalidArgumentException("Ungültiges Log-Level: $minLevel");
         }
 
         $this->minLevel = $minLevel;

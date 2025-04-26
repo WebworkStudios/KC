@@ -11,6 +11,7 @@ use ReflectionClass;
 use RuntimeException;
 use Src\Container\Container;
 use Src\Log\LoggerInterface;
+use Throwable;
 
 /**
  * Router-Klasse für das Routing von HTTP-Anfragen zu Action-Klassen
@@ -34,7 +35,7 @@ class Router
      */
     public function __construct(
         private readonly Container $container,
-        ?LoggerInterface $logger = null
+        ?LoggerInterface           $logger = null
     )
     {
         // Logger aus Container holen, falls nicht direkt übergeben
@@ -293,7 +294,7 @@ class Router
             ]);
 
             return $response;
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $this->logger->error("Error executing action", [
                 'action' => $routeData['action'],
                 'exception' => $e->getMessage(),
