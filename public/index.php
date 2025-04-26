@@ -28,8 +28,21 @@ $startTime = microtime(true);
 // Autoloader laden
 require_once __DIR__ . '/../vendor/autoload.php';
 
+// Bootstrap-Datei laden
+require_once __DIR__ . '/../app/bootstrap.php';
+
 // Container initialisieren
-$container = new Src\Container\Container();
+$container = bootstrapContainer([
+    'app' => [
+        'name' => 'PHP 8.4 ADR Framework',
+        'environment' => DEBUG ? 'development' : 'production',
+        'debug' => DEBUG,
+        'url' => APP_URL,
+    ],
+]);
+
+// Logger abrufen
+$logger = $container->get(Src\Log\LoggerInterface::class);
 
 // Request erstellen
 $request = Src\Http\Request::fromGlobals();
@@ -37,6 +50,7 @@ $request = Src\Http\Request::fromGlobals();
 // Router initialisieren
 try {
     $router = new Src\Http\Router($container);
+    $logger->debug('Router initialisiert');
 
     // Prüfen, ob das Actions-Verzeichnis existiert
     $actionsDir = __DIR__ . '/../app/Actions';
@@ -46,18 +60,28 @@ try {
 
     // Actions registrieren
     $router->registerActionsFromDirectory('App\\Actions', $actionsDir);
+    $logger->info('Actions registriert aus Verzeichnis: ' . $actionsDir);
 
-    // HelloWorldAction für den Anfang manuell registrieren
-    $router->registerAction('App\\Actions\\HelloWorldAction');
+    // LoggingMiddleware als globale Middleware verwenden
+    $loggingMiddleware = $container->get(Src\Http\Middleware\LoggingMiddleware::class);
 
     // Request dispatchen
     $response = $router->dispatch($request);
 
     // 404 wenn keine Route gefunden wurde
     if ($response === null) {
+        $logger->warning('Keine Route gefunden für: ' . $request->getPath());
         $response = new Src\Http\Response('Not Found', 404);
     }
 } catch (Throwable $e) {
+    // Fehler loggen
+    $logger->error('Fehler beim Verarbeiten der Anfrage: ' . $e->getMessage(), [
+        'exception' => get_class($e),
+        'file' => $e->getFile(),
+        'line' => $e->getLine(),
+        'trace' => $e->getTraceAsString()
+    ]);
+
     // Fehlerseite für Entwicklungsumgebung
     if (defined('DEBUG') && DEBUG) {
         $response = new Src\Http\Response(
@@ -69,16 +93,20 @@ try {
         // Produktionsumgebung: Allgemeine Fehlermeldung
         $response = new Src\Http\Response('Internal Server Error', 500);
     }
-
-    // Fehler loggen
-    error_log($e->getMessage() . "\n" . $e->getTraceAsString());
 }
 
 // WICHTIG: Response an Client senden
 $response->send();
 
 // Performance-Messung für Entwicklung
+$executionTime = microtime(true) - $startTime;
+$logger->debug('Anfrage verarbeitet in ' . number_format($executionTime * 1000, 2) . ' ms', [
+    'execution_time_ms' => $executionTime * 1000,
+    'memory_usage' => memory_get_usage(true),
+    'memory_peak' => memory_get_peak_usage(true)
+]);
+
+// Nur im Debug-Modus in error_log schreiben
 if (DEBUG) {
-    $executionTime = microtime(true) - $startTime;
     error_log("Ausführungszeit: " . number_format($executionTime * 1000, 2) . " ms");
 }
