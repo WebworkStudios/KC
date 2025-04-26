@@ -10,6 +10,7 @@ use RecursiveIteratorIterator;
 use ReflectionClass;
 use RuntimeException;
 use Src\Container\Container;
+use Src\Log\LoggerInterface;
 
 /**
  * Router-Klasse für das Routing von HTTP-Anfragen zu Action-Klassen
@@ -22,15 +23,22 @@ class Router
     /** @var array<string, string> Named routes für URL-Generierung */
     private array $namedRoutes = [];
 
+    /** @var LoggerInterface Logger-Instanz */
+    private readonly LoggerInterface $logger;
+
     /**
      * Erstellt einen neuen Router
      *
      * @param Container $container DI-Container für das Auflösen von Action-Klassen
+     * @param LoggerInterface|null $logger Logger für Router-Operationen
      */
     public function __construct(
-        private readonly Container $container
+        private readonly Container $container,
+        ?LoggerInterface $logger = null
     )
     {
+        // Logger aus Container holen, falls nicht direkt übergeben
+        $this->logger = $logger ?? $container->get(LoggerInterface::class);
     }
 
     /**
@@ -45,15 +53,18 @@ class Router
         $directory = rtrim($directory, '/\\');
 
         if (!is_dir($directory)) {
-            if (DEBUG) {
-                echo "Warnung: Actions-Verzeichnis nicht gefunden: {$directory}";
-            }
+            $this->logger->warning("Actions-Verzeichnis nicht gefunden", [
+                'directory' => $directory,
+                'namespace' => $namespace
+            ]);
             return $this;
         }
 
         try {
             $directoryIterator = new RecursiveDirectoryIterator($directory);
             $iterator = new RecursiveIteratorIterator($directoryIterator);
+            $actionCount = 0;
+            $routeCount = 0;
 
             foreach ($iterator as $file) {
                 if ($file->isFile() && $file->getExtension() === 'php') {
@@ -62,14 +73,26 @@ class Router
                     $className = $namespace . '\\' . substr($relativeFilePath, 0, -4); // Entferne .php
 
                     if (class_exists($className)) {
-                        $this->registerAction($className);
+                        $actionCount++;
+                        $newRoutes = $this->registerAction($className);
+                        $routeCount += $newRoutes;
                     }
                 }
             }
+
+            $this->logger->info("Actions registriert", [
+                'directory' => $directory,
+                'namespace' => $namespace,
+                'action_count' => $actionCount,
+                'route_count' => $routeCount
+            ]);
         } catch (Exception $e) {
-            if (DEBUG) {
-                echo "Fehler beim Durchsuchen des Actions-Verzeichnisses: " . $e->getMessage();
-            }
+            $this->logger->error("Fehler beim Durchsuchen des Actions-Verzeichnisses", [
+                'directory' => $directory,
+                'namespace' => $namespace,
+                'exception' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             return $this;
         }
 
@@ -80,15 +103,19 @@ class Router
      * Registriert eine einzelne Action-Klasse
      *
      * @param string $actionClass Klassenname der Action
-     * @return self
+     * @return int Anzahl der registrierten Routen
      */
-    public function registerAction(string $actionClass): self
+    public function registerAction(string $actionClass): int
     {
         $reflectionClass = new ReflectionClass($actionClass);
+        $routeCount = 0;
 
         // Die __invoke-Methode suchen
         if (!$reflectionClass->hasMethod('__invoke')) {
-            return $this;
+            $this->logger->debug("Keine __invoke-Methode gefunden in Action", [
+                'action' => $actionClass
+            ]);
+            return $routeCount;
         }
 
         $method = $reflectionClass->getMethod('__invoke');
@@ -98,9 +125,17 @@ class Router
             /** @var Route $route */
             $route = $attribute->newInstance();
             $this->addRoute($route, $actionClass);
+            $routeCount++;
+
+            $this->logger->debug("Route registriert", [
+                'action' => $actionClass,
+                'path' => $route->path,
+                'methods' => is_array($route->methods) ? implode(',', $route->methods) : $route->methods,
+                'name' => $route->name
+            ]);
         }
 
-        return $this;
+        return $routeCount;
     }
 
     /**
@@ -130,6 +165,10 @@ class Router
             // Named Route registrieren, falls vorhanden
             if ($route->name !== null) {
                 $this->namedRoutes[$route->name] = $route->path;
+                $this->logger->debug("Named Route registriert", [
+                    'name' => $route->name,
+                    'path' => $route->path
+                ]);
             }
         }
     }
@@ -145,9 +184,19 @@ class Router
         $method = $request->getMethod();
         $path = $this->normalizePath($request->getPath());
 
+        $this->logger->debug("Dispatching request", [
+            'method' => $method,
+            'path' => $path
+        ]);
+
         // Prüfen, ob eine exakte Route für diese Methode und diesen Pfad existiert
         if (isset($this->routes[$method][$path])) {
-            return $this->executeAction($this->routes[$method][$path], $request, []);
+            $routeData = $this->routes[$method][$path];
+            $this->logger->debug("Exakte Route gefunden", [
+                'action' => $routeData['action'],
+                'name' => $routeData['name'] ?? 'unnamed'
+            ]);
+            return $this->executeAction($routeData, $request, []);
         }
 
         // Dynamische Routen mit Parametern prüfen
@@ -155,10 +204,20 @@ class Router
             $params = $this->matchRoute($routePath, $path);
 
             if ($params !== null) {
+                $this->logger->debug("Dynamische Route gefunden", [
+                    'route_path' => $routePath,
+                    'action' => $routeData['action'],
+                    'name' => $routeData['name'] ?? 'unnamed',
+                    'params' => $params
+                ]);
                 return $this->executeAction($routeData, $request, $params);
             }
         }
 
+        $this->logger->notice("Keine Route gefunden", [
+            'method' => $method,
+            'path' => $path
+        ]);
         return null;
     }
 
@@ -189,28 +248,61 @@ class Router
             $request->setRouteParameter($name, $value);
         }
 
+        $this->logger->debug("Executing action", [
+            'action' => $routeData['action'],
+            'route_params' => $params
+        ]);
+
         // Middleware ausführen
         foreach ($routeData['middleware'] as $middlewareClass) {
+            $this->logger->debug("Executing middleware", [
+                'middleware' => $middlewareClass
+            ]);
+
             $middleware = $this->container->get($middlewareClass);
             $response = $middleware->process($request, fn($req) => null);
 
             // Wenn Middleware eine Response zurückgibt, diese direkt zurückgeben
             if ($response instanceof Response) {
+                $this->logger->debug("Middleware returned response", [
+                    'middleware' => $middlewareClass,
+                    'status' => $response->getStatus()
+                ]);
                 return $response;
             }
         }
 
         // Action ausführen
-        $action = $this->container->get($routeData['action']);
-        $response = $action($request);
+        try {
+            $action = $this->container->get($routeData['action']);
+            $response = $action($request);
 
-        if (!$response instanceof Response) {
-            throw new RuntimeException(
-                "Action {$routeData['action']} muss eine Response zurückgeben"
-            );
+            if (!$response instanceof Response) {
+                $this->logger->error("Action returned invalid response type", [
+                    'action' => $routeData['action'],
+                    'type' => gettype($response)
+                ]);
+                throw new RuntimeException(
+                    "Action {$routeData['action']} muss eine Response zurückgeben"
+                );
+            }
+
+            $this->logger->debug("Action executed successfully", [
+                'action' => $routeData['action'],
+                'status' => $response->getStatus()
+            ]);
+
+            return $response;
+        } catch (\Throwable $e) {
+            $this->logger->error("Error executing action", [
+                'action' => $routeData['action'],
+                'exception' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
         }
-
-        return $response;
     }
 
     /**
@@ -246,6 +338,9 @@ class Router
     public function url(string $name, array $params = []): string
     {
         if (!isset($this->namedRoutes[$name])) {
+            $this->logger->warning("Named route nicht gefunden", [
+                'name' => $name
+            ]);
             throw new InvalidArgumentException("Named route '$name' not found");
         }
 
@@ -255,6 +350,12 @@ class Router
         foreach ($params as $key => $value) {
             $url = str_replace("{{$key}}", (string)$value, $url);
         }
+
+        $this->logger->debug("URL generiert", [
+            'name' => $name,
+            'params' => $params,
+            'url' => $url
+        ]);
 
         return $url;
     }

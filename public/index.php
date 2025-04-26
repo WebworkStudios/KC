@@ -75,12 +75,13 @@ try {
     }
 } catch (Throwable $e) {
     // Fehler loggen
-    $logger->error('Fehler beim Verarbeiten der Anfrage: ' . $e->getMessage(), [
-        'exception' => get_class($e),
-        'file' => $e->getFile(),
-        'line' => $e->getLine(),
-        'trace' => $e->getTraceAsString()
-    ]);
+    Src\Log\LogException::log(
+        $logger,
+        $e,
+        'error',
+        'Fehler beim Verarbeiten der Anfrage',
+        ['request_path' => $request->getPath()]
+    );
 
     // Fehlerseite für Entwicklungsumgebung
     if (defined('DEBUG') && DEBUG) {

@@ -41,12 +41,21 @@ function bootstrapContainer(array $config = []): Container
 
     // Standard-Logger erstellen und registrieren
     $environment = $appConfig->get('app.environment', 'development');
-    $logger = $loggerFactory->createDefaultLogger($environment, [
+    $logger = $loggerFactory->createLogger('file', [
+        'filename' => 'container.log',
         'level' => $appConfig->get('logging.level', 'debug'),
-        'filename' => $appConfig->get('logging.file.filename', 'app.log'),
     ]);
 
+    // Logger im Container registrieren
     $container->register(LoggerInterface::class, $logger);
+
+    // Logger im Container selbst setzen
+    $container->setLogger($logger);
+
+    // Verbose Logging im Entwicklungsmodus aktivieren
+    if ($environment === 'development') {
+        $container->setVerboseLogging(true);
+    }
 
     // LoggingMiddleware registrieren
     $container->register(LoggingMiddleware::class);
