@@ -1616,4 +1616,96 @@ class QueryBuilder
 
         $this->cache->invalidateByTag("table:{$this->connectionName}:{$this->table}");
     }
+
+    /**
+     * Gibt die verwendete Cache-Instanz zurück
+     *
+     * @return CacheInterface Cache-Instanz
+     */
+    public function getCache(): CacheInterface
+    {
+        return $this->cache;
+    }
+
+    /**
+     * Aktiviert das Cache-Tagging für diese Abfrage
+     *
+     * Tags ermöglichen eine genauere Invalidierung von zusammengehörigen Caches
+     *
+     * @param string|null $key Optionaler Cache-Key (wird automatisch generiert, wenn nicht angegeben)
+     * @param int $ttl Cache-Lebensdauer in Sekunden (null für unbegrenzt)
+     * @param array $tags Array von Tags zur Kategorisierung des Caches
+     * @return self
+     */
+    public function cacheWithTags(?string $key = null, int $ttl = 3600, array $tags = []): self
+    {
+        // Tabellennamen als Standard-Tag verwenden, wenn keine Tags angegeben
+        if (empty($tags) && !empty($this->table)) {
+            // Aliasse vom Tabellennamen entfernen (z.B. "users AS u" -> "users")
+            $tableName = preg_replace('/\s+AS\s+.*/i', '', $this->table);
+            $tags = [$tableName];
+        }
+
+        $this->cacheTtl = $ttl;
+        $this->cacheKey = $key;
+        $this->cacheTags = $tags;
+
+        return $this;
+    }
+
+    /**
+     * Invalidiert alle Caches, die mit einem bestimmten Tag versehen sind
+     *
+     * @param string $tag Tag, der invalidiert werden soll
+     * @return bool True bei Erfolg
+     */
+    public function invalidateCacheTag(string $tag): bool
+    {
+        return $this->cache->invalidateByTag($tag);
+    }
+
+    /**
+     * Invalidiert alle Caches, die mit der aktuellen Tabelle zusammenhängen
+     *
+     * @return bool True bei Erfolg
+     */
+    public function invalidateTableCache(): bool
+    {
+        if (empty($this->table)) {
+            return false;
+        }
+
+        // Aliasse vom Tabellennamen entfernen
+        $tableName = preg_replace('/\s+AS\s+.*/i', '', $this->table);
+
+        $this->logger->debug("Invalidiere Cache für Tabelle", [
+            'connection' => $this->connectionName,
+            'table' => $tableName
+        ]);
+
+        return $this->cache->invalidateByTag($tableName);
+    }
+
+    /**
+     * Führt eine Cache-Operation aus und fängt Ausnahmen ab
+     *
+     * @param string $operation Name der Operation ('set', 'get', usw.)
+     * @param callable $callback Auszuführende Operation
+     * @param mixed $default Standardwert, falls die Operation fehlschlägt
+     * @return mixed Ergebnis der Operation oder Standardwert
+     */
+    private function safeCacheOperation(string $operation, callable $callback, mixed $default = null): mixed
+    {
+        try {
+            return $callback();
+        } catch (\Throwable $e) {
+            $this->logger->error("Fehler bei Cache-Operation '$operation': " . $e->getMessage(), [
+                'connection' => $this->connectionName,
+                'table' => $this->table,
+                'exception' => get_class($e)
+            ]);
+
+            return $default;
+        }
+    }
 }
