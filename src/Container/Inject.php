@@ -1,6 +1,6 @@
 <?php
 
-namespace Advanced\DI;
+namespace Src\Container;
 
 /**
  * Attribut zum Markieren von Properties für Auto-Wiring

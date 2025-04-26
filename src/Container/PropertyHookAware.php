@@ -1,6 +1,6 @@
 <?php
 
-namespace Advanced\DI;
+namespace Src\Container;
 
 /**
  * Interface für Objekte, die Hooks für Property-Änderungen implementieren möchten

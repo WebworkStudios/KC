@@ -3,10 +3,10 @@
 
 require_once 'container.php'; // Pfad zur Container-Implementierung
 
-use Advanced\DI\Container;
-use Advanced\DI\Inject;
-use Advanced\DI\Observable;
-use Advanced\DI\PropertyHookAware;
+use Src\Container\Container;
+use Src\Container\Inject;
+use Src\Container\Observable;
+use Src\Container\PropertyHookAware;
 
 /**
  * Einfache Unit-Test-Klasse für den DI-Container

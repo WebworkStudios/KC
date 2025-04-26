@@ -13,7 +13,7 @@
 
 declare(strict_types=1);
 
-namespace Advanced\DI;
+namespace Src\Container;
 
 use Closure;
 use InvalidArgumentException;
@@ -320,7 +320,7 @@ class Container
         $proxy = new class($instance, $observableProperties, $propertyValues) {
             private object $instance;
             private array $observableProperties;
-            private array &$propertyValues;
+            private array $propertyValues;
 
             public function __construct(object $instance, array $observableProperties, array &$propertyValues)
             {
