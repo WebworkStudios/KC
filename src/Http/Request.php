@@ -63,14 +63,31 @@ class Request
      */
     public function getPath(): string
     {
+        // Bei virtuellen Hosts mit eigener Domain wie kickerscup.local
+        // enthält REQUEST_URI den vollständigen Pfad nach der Domain
         $path = $this->server['PATH_INFO'] ?? $this->server['REQUEST_URI'] ?? '/';
 
-        // Query-String entfernen, falls vorhanden
+        // Query-String entfernen
         if (($pos = strpos($path, '?')) !== false) {
             $path = substr($path, 0, $pos);
         }
 
-        return $path;
+        // Script-Name entfernen falls vorhanden (bei nicht optimalen vHost-Konfigurationen)
+        $scriptName = $this->server['SCRIPT_NAME'] ?? '/index.php';
+        if (strpos($path, $scriptName) === 0) {
+            $path = substr($path, strlen($scriptName));
+        }
+
+        return $this->normalizePath($path);
+    }
+
+    /**
+     * Normalisiert einen Pfad
+     */
+    private function normalizePath(string $path): string
+    {
+        $path = '/' . trim($path, '/');
+        return $path === '/' ? $path : rtrim($path, '/');
     }
 
     /**

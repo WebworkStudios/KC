@@ -1,10 +1,9 @@
 # Aktiviert die Rewrite-Engine
 RewriteEngine On
 
-# Basisverzeichnis für die Rewrites setzen (falls in einem Unterverzeichnis)
-# Wenn dein Projekt in einem Unterverzeichnis von XAMPP installiert ist,
-# entferne den Kommentar bei der folgenden Zeile und passe den Pfad an
-# RewriteBase /mein-projekt/
+# Basisverzeichnis für die Rewrites setzen
+# Da die Domain direkt auf kickerscup.local zeigt, brauchen wir "/"
+RewriteBase /
 
 # Echte Dateien und Verzeichnisse nicht umleiten
 RewriteCond %{REQUEST_FILENAME} !-f
@@ -13,6 +12,7 @@ RewriteCond %{REQUEST_FILENAME} !-d
 # Alle Anfragen an index.php weiterleiten
 RewriteRule ^(.*)$ index.php [QSA,L]
 
+# Rest der Datei unverändert...
 # PHP-Einstellungen angepasst für XAMPP Entwicklungsumgebung
 <IfModule mod_php.c>
     # Fehleranzeige für Entwicklungsumgebung aktivieren

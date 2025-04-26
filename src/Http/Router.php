@@ -40,21 +40,26 @@ class Router
      */
     public function registerActionsFromDirectory(string $namespace, string $directory): self
     {
-        $directoryIterator = new \RecursiveDirectoryIterator($directory);
-        $iterator = new \RecursiveIteratorIterator($directoryIterator);
+        $directory = rtrim($directory, '/\\');
 
-        foreach ($iterator as $file) {
-            if ($file->isFile() && $file->getExtension() === 'php') {
-                $className = $namespace . '\\' . str_replace(
-                        ['/', '.php'],
-                        ['\\', ''],
-                        substr($file->getPathname(), strlen($directory) + 1)
-                    );
-
-                if (class_exists($className)) {
-                    $this->registerAction($className);
-                }
+        if (!is_dir($directory)) {
+            if (DEBUG) {
+                echo "Warnung: Actions-Verzeichnis nicht gefunden: {$directory}";
             }
+            return $this;  // Elegant fehlschlagen statt Exception
+        }
+
+        try {
+            $directoryIterator = new \RecursiveDirectoryIterator($directory);
+            $iterator = new \RecursiveIteratorIterator($directoryIterator);
+
+            // Rest des Codes...
+        } catch (\Exception $e) {
+            if (DEBUG) {
+                echo "Fehler beim Durchsuchen des Actions-Verzeichnisses: " . $e->getMessage();
+            }
+            // Elegant fehlschlagen
+            return $this;
         }
 
         return $this;

@@ -10,8 +10,8 @@ class HelloWorldAction
     #[Route(path: '/', name: 'home')]
     public function __invoke(Request $request): Response
     {
-        return new Response(view('hello_world', [
+        return new Response('hello_world', [
             'message' => 'Hello, World!'
-        ]));
+        ]);
     }
 }

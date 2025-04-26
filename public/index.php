@@ -12,40 +12,60 @@
 
 declare(strict_types=1);
 
+// Fehlerbehandlung für Entwicklung
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+// Debug-Modus für Entwicklung
+define('DEBUG', true);
+define('BASE_PATH', __DIR__ . '/..');
+define('APP_URL', 'http://kickerscup.local');
+
 // Bootstrapping
 $startTime = microtime(true);
 
 // Autoloader laden
 require_once __DIR__ . '/../vendor/autoload.php';
 
-// Hilfsfunktionen laden
-require_once __DIR__ . '/../src/functions.php';
-
 // Container initialisieren
 $container = new Src\Container\Container();
 
 // Request erstellen
 $request = Src\Http\Request::fromGlobals();
-
 // Router initialisieren
-$router = new Src\Http\Router($container);
+try {
+    $router = new Src\Http\Router($container);
 
-// Actions registrieren
-$router->registerActionsFromDirectory('App\\Actions', __DIR__ . '/../app/Actions');
+    // Prüfen, ob das Actions-Verzeichnis existiert
+    $actionsDir = __DIR__ . '/../app/Actions';
+    if (!is_dir($actionsDir)) {
+        throw new RuntimeException("Actions-Verzeichnis nicht gefunden: $actionsDir");
+    }
 
-// Request dispatchen
-$response = $router->dispatch($request);
+    // Actions registrieren
+    $router->registerActionsFromDirectory('App\\Actions', $actionsDir);
 
-// 404 wenn keine Route gefunden wurde
-if ($response === null) {
-    $response = new Src\Http\Response('Not Found', 404);
-}
+    // Request dispatchen
+    $response = $router->dispatch($request);
 
-// Response senden
-$response->send();
+    // 404 wenn keine Route gefunden wurde
+    if ($response === null) {
+        $response = new Src\Http\Response('Not Found', 404);
+    }
+} catch (\Throwable $e) {
+    // Fehlerseite für Entwicklungsumgebung
+    if (defined('DEBUG') && DEBUG) {
+        $response = new Src\Http\Response(
+            '<h1>Fehler</h1><pre>' . $e->getMessage() . "\n" . $e->getTraceAsString() . '</pre>',
+            500,
+            'text/html'
+        );
+    } else {
+        // Produktionsumgebung: Allgemeine Fehlermeldung
+        $response = new Src\Http\Response('Internal Server Error', 500);
+    }
 
-// Debug-Informationen (nur in Entwicklungsumgebung)
-if (defined('DEBUG') && DEBUG) {
-    $executionTime = microtime(true) - $startTime;
-    echo "<!-- Ausführungszeit: {$executionTime}s -->";
+    // Fehler loggen
+    error_log($e->getMessage() . "\n" . $e->getTraceAsString());
 }
