@@ -2,6 +2,7 @@
 
 namespace Src\Database;
 
+use AllowDynamicProperties;
 use Closure;
 use InvalidArgumentException;
 use PDO;
@@ -15,6 +16,8 @@ use Src\Database\Enums\SqlOperator;
 use Src\Database\Exceptions\QueryException;
 use Src\Database\Traits\PaginationTrait;
 use Src\Database\Traits\TransactionTrait;
+use Src\Database\Traits\QueryBuilderAnonymizationTrait;
+use Src\Database\Anonymization\AnonymizationService;
 use Src\Log\LoggerInterface;
 
 /**
@@ -22,10 +25,11 @@ use Src\Log\LoggerInterface;
  *
  * Ermöglicht die einfache Erstellung von SQL-Abfragen mit einem Fluent Interface.
  */
-class QueryBuilder
+#[AllowDynamicProperties] class QueryBuilder
 {
     use TransactionTrait;
     use PaginationTrait;
+    use QueryBuilderAnonymizationTrait;
 
     /** @var string Tabelle, auf die zugegriffen wird */
     private string $table = '';
@@ -213,19 +217,6 @@ class QueryBuilder
     public function sum(string $column, ?string $alias = null): self
     {
         $this->aggregate('SUM', $column, $alias);
-        return $this;
-    }
-
-    /**
-     * Setzt eine COUNT-Funktion
-     *
-     * @param string $column Spaltenname
-     * @param string|null $alias Alias für das Ergebnis
-     * @return self
-     */
-    public function count(string $column = '*', ?string $alias = null): self
-    {
-        $this->aggregate('COUNT', $column, $alias);
         return $this;
     }
 
@@ -744,7 +735,8 @@ class QueryBuilder
                     'cache_key' => $cacheKey
                 ]);
 
-                return $cachedResult;
+                // Anonymisierung auch auf gecachte Ergebnisse anwenden
+                return $this->anonymizationEnabled ? $this->anonymizeResults($cachedResult) : $cachedResult;
             }
         }
 
@@ -760,6 +752,8 @@ class QueryBuilder
             // Ergebnis cachen, wenn Caching aktiviert ist
             if ($this->cacheTtl !== null) {
                 $cacheKey = $this->generateCacheKey();
+
+                // Originaldaten im Cache speichern (nicht die anonymisierten)
                 $this->cache->set($cacheKey, $result, $this->cacheTtl);
 
                 $this->logger->debug("Abfrageergebnis in Cache gespeichert", [
@@ -769,7 +763,8 @@ class QueryBuilder
                 ]);
             }
 
-            return $result;
+            // Anonymisierung anwenden, falls aktiviert
+            return $this->anonymizationEnabled ? $this->anonymizeResults($result) : $result;
         } catch (\PDOException $e) {
             $this->logger->error("Fehler bei SELECT-Abfrage", [
                 'connection' => $this->connectionName,
@@ -793,8 +788,10 @@ class QueryBuilder
         $this->limit = 1;
 
         $results = $this->get();
+        $result = $results[0] ?? null;
 
-        return $results[0] ?? null;
+        // Hier keine explizite Anonymisierung nötig, da get() bereits die Anonymisierung anwendet
+        return $result;
     }
 
     /**
@@ -1662,28 +1659,6 @@ class QueryBuilder
     public function invalidateCacheTag(string $tag): bool
     {
         return $this->cache->invalidateByTag($tag);
-    }
-
-    /**
-     * Invalidiert alle Caches, die mit der aktuellen Tabelle zusammenhängen
-     *
-     * @return bool True bei Erfolg
-     */
-    public function invalidateTableCache(): bool
-    {
-        if (empty($this->table)) {
-            return false;
-        }
-
-        // Aliasse vom Tabellennamen entfernen
-        $tableName = preg_replace('/\s+AS\s+.*/i', '', $this->table);
-
-        $this->logger->debug("Invalidiere Cache für Tabelle", [
-            'connection' => $this->connectionName,
-            'table' => $tableName
-        ]);
-
-        return $this->cache->invalidateByTag($tableName);
     }
 
     /**
