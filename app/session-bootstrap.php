@@ -21,7 +21,7 @@ use Src\Session\SessionInterface;
  * @param array $config Anwendungskonfiguration
  * @return void
  */
-function bootstrapSession(Container $container, array $config): void
+function bootstrapSessions(Container $container, array $config): void
 {
     // Logger abrufen
     $logger = $container->get(LoggerInterface::class);
