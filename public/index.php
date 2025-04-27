@@ -54,13 +54,13 @@ try {
     bootstrapSession($container, $config);
 
     // Cache initialisieren
-    bootstrapCache($container, $config);
+    initializeCache($container, $config);
 
     // Request erstellen
     $request = Src\Http\Request::fromGlobals();
 
     // Router initialisieren
-    $router = new Src\Http\Router($container);
+    $router = new Src\Http\Router($container, $logger);
     $logger->debug('Router initialisiert');
 
     // Prüfen, ob das Actions-Verzeichnis existiert
@@ -74,9 +74,12 @@ try {
     $logger->info('Actions registriert aus Verzeichnis: ' . $actionsDir);
 
     // Globale Middlewares registrieren
-    $middlewares = [
-        $container->get(Src\Http\Middleware\LoggingMiddleware::class),
-    ];
+    $middlewares = [];
+
+    // LoggingMiddleware hinzufügen, wenn verfügbar
+    if ($container->has(Src\Http\Middleware\LoggingMiddleware::class)) {
+        $middlewares[] = $container->get(Src\Http\Middleware\LoggingMiddleware::class);
+    }
 
     // CSRF-Middleware aktivieren, wenn vorhanden
     if ($container->has(Src\Http\Middleware\CsrfMiddleware::class) &&

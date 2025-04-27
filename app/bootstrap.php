@@ -61,7 +61,7 @@ function bootstrapContainer(array $config = []): Container
     }
 
     // LoggingMiddleware registrieren
-    $container->register(LoggingMiddleware::class);
+    $container->register(LoggingMiddleware::class, new LoggingMiddleware($logger));
 
     // Datenbank initialisieren, falls konfiguriert
     initializeDatabase($container, $appConfig);
@@ -181,7 +181,7 @@ function bootstrapSession(Container $container, array $config): void
  * @param array $config Konfiguration
  * @return void
  */
-function bootstrapCache(Container $container, array $config): void
+function initializeCache(Container $container, array $config): void
 {
     $cacheBootstrapFile = BASE_PATH . '/app/cache-bootstrap.php';
 
