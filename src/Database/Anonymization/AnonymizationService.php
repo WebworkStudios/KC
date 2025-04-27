@@ -35,24 +35,6 @@ class AnonymizationService
     }
 
     /**
-     * Registriert eine Anonymisierungsstrategie
-     *
-     * @param string $name Name der Strategie
-     * @param callable $strategy Callback-Funktion für die Anonymisierung
-     * @return self
-     */
-    public function registerStrategy(string $name, callable $strategy): self
-    {
-        $this->strategies[$name] = $strategy;
-
-        $this->logger->debug("Anonymisierungsstrategie registriert", [
-            'strategy' => $name
-        ]);
-
-        return $this;
-    }
-
-    /**
      * Registriert die Standard-Anonymisierungsstrategien
      *
      * @return void
@@ -274,33 +256,37 @@ class AnonymizationService
     }
 
     /**
-     * Führt die Anonymisierung eines Wertes durch
+     * Registriert eine Anonymisierungsstrategie
      *
-     * @param mixed $value Zu anonymisierender Wert
-     * @param string $strategy Name der zu verwendenden Strategie
-     * @param array $options Optionen für die Anonymisierung
-     * @return mixed Anonymisierter Wert
-     * @throws InvalidArgumentException Wenn die Strategie nicht existiert
+     * @param string $name Name der Strategie
+     * @param callable $strategy Callback-Funktion für die Anonymisierung
+     * @return self
      */
-    public function anonymize(mixed $value, string $strategy, array $options = []): mixed
+    public function registerStrategy(string $name, callable $strategy): self
     {
-        // Nur Strings anonymisieren
-        if (!is_string($value) || empty($value)) {
-            return $value;
-        }
+        $this->strategies[$name] = $strategy;
 
-        if (!isset($this->strategies[$strategy])) {
-            throw new InvalidArgumentException("Anonymisierungsstrategie '$strategy' nicht gefunden");
-        }
-
-        $originalLength = strlen($value);
-        $result = ($this->strategies[$strategy])($value, $options);
-
-        $this->logger->debug("Wert anonymisiert", [
-            'strategy' => $strategy,
-            'original_length' => $originalLength,
-            'anonymized_length' => is_string($result) ? strlen($result) : 0
+        $this->logger->debug("Anonymisierungsstrategie registriert", [
+            'strategy' => $name
         ]);
+
+        return $this;
+    }
+
+    /**
+     * Anonymisiert mehrere Datensätze
+     *
+     * @param array<array> $dataSet Array von Datensätzen
+     * @param array $fields Zu anonymisierende Felder mit Strategien
+     * @return array<array> Anonymisierte Datensätze
+     */
+    public function anonymizeDataSet(array $dataSet, array $fields): array
+    {
+        $result = [];
+
+        foreach ($dataSet as $data) {
+            $result[] = $this->anonymizeData($data, $fields);
+        }
 
         return $result;
     }
@@ -331,19 +317,33 @@ class AnonymizationService
     }
 
     /**
-     * Anonymisiert mehrere Datensätze
+     * Führt die Anonymisierung eines Wertes durch
      *
-     * @param array<array> $dataSet Array von Datensätzen
-     * @param array $fields Zu anonymisierende Felder mit Strategien
-     * @return array<array> Anonymisierte Datensätze
+     * @param mixed $value Zu anonymisierender Wert
+     * @param string $strategy Name der zu verwendenden Strategie
+     * @param array $options Optionen für die Anonymisierung
+     * @return mixed Anonymisierter Wert
+     * @throws InvalidArgumentException Wenn die Strategie nicht existiert
      */
-    public function anonymizeDataSet(array $dataSet, array $fields): array
+    public function anonymize(mixed $value, string $strategy, array $options = []): mixed
     {
-        $result = [];
-
-        foreach ($dataSet as $data) {
-            $result[] = $this->anonymizeData($data, $fields);
+        // Nur Strings anonymisieren
+        if (!is_string($value) || empty($value)) {
+            return $value;
         }
+
+        if (!isset($this->strategies[$strategy])) {
+            throw new InvalidArgumentException("Anonymisierungsstrategie '$strategy' nicht gefunden");
+        }
+
+        $originalLength = strlen($value);
+        $result = ($this->strategies[$strategy])($value, $options);
+
+        $this->logger->debug("Wert anonymisiert", [
+            'strategy' => $strategy,
+            'original_length' => $originalLength,
+            'anonymized_length' => is_string($result) ? strlen($result) : 0
+        ]);
 
         return $result;
     }

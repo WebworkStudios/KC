@@ -22,7 +22,7 @@ class LogException
      */
     public static function log(
         LoggerInterface $logger,
-        Throwable      $exception,
+        Throwable       $exception,
         string          $level = 'error',
         string          $message = '',
         array           $context = []

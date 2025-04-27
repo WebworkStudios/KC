@@ -24,21 +24,6 @@ class DatabaseFactory
     private static array $cacheProviders = [];
 
     /**
-     * Erstellt einen ConnectionManager oder gibt die bestehende Instanz zurück
-     *
-     * @param LoggerInterface|null $logger Optional: Logger für Datenbankoperationen
-     * @return ConnectionManager ConnectionManager-Instanz
-     */
-    public static function getConnectionManager(?LoggerInterface $logger = null): ConnectionManager
-    {
-        if (self::$connectionManager === null) {
-            self::$connectionManager = new ConnectionManager($logger ?? new NullLogger());
-        }
-
-        return self::$connectionManager;
-    }
-
-    /**
      * Konfiguriert und registriert eine neue Datenbankverbindung
      *
      * @param string $name Name der Verbindung (z.B. 'forum', 'pages', 'game')
@@ -92,6 +77,21 @@ class DatabaseFactory
     }
 
     /**
+     * Erstellt einen ConnectionManager oder gibt die bestehende Instanz zurück
+     *
+     * @param LoggerInterface|null $logger Optional: Logger für Datenbankoperationen
+     * @return ConnectionManager ConnectionManager-Instanz
+     */
+    public static function getConnectionManager(?LoggerInterface $logger = null): ConnectionManager
+    {
+        if (self::$connectionManager === null) {
+            self::$connectionManager = new ConnectionManager($logger ?? new NullLogger());
+        }
+
+        return self::$connectionManager;
+    }
+
+    /**
      * Erstellt einen neuen QueryBuilder für eine bestimmte Verbindung
      *
      * @param string $connectionName Name der Verbindung
@@ -138,18 +138,6 @@ class DatabaseFactory
     }
 
     /**
-     * Registriert einen Cache-Provider
-     *
-     * @param string $name Name des Providers
-     * @param CacheInterface $cache Cache-Provider
-     * @return void
-     */
-    public static function registerCacheProvider(string $name, CacheInterface $cache): void
-    {
-        self::$cacheProviders[$name] = $cache;
-    }
-
-    /**
      * Erstellt eine In-Memory-Cache-Instanz und registriert sie
      *
      * @param string|null $name Optional: Name für die Registrierung
@@ -164,6 +152,18 @@ class DatabaseFactory
         }
 
         return $cache;
+    }
+
+    /**
+     * Registriert einen Cache-Provider
+     *
+     * @param string $name Name des Providers
+     * @param CacheInterface $cache Cache-Provider
+     * @return void
+     */
+    public static function registerCacheProvider(string $name, CacheInterface $cache): void
+    {
+        self::$cacheProviders[$name] = $cache;
     }
 
     /**

@@ -1,11 +1,13 @@
 # Datenanonymisierung für PHP 8.4 PDO Query Builder
 
-Eine leistungsstarke Erweiterung für den PHP 8.4 PDO Query Builder, die automatische Anonymisierung sensibler Daten ermöglicht, um den Datenschutz zu verbessern und die DSGVO-Konformität zu unterstützen.
+Eine leistungsstarke Erweiterung für den PHP 8.4 PDO Query Builder, die automatische Anonymisierung sensibler Daten
+ermöglicht, um den Datenschutz zu verbessern und die DSGVO-Konformität zu unterstützen.
 
 ## Funktionen
 
 - **Automatische Anonymisierung**: Anonymisieren Sie sensible Daten direkt in Datenbankabfragen
-- **Mehrere Anonymisierungsstrategien**: Vordefinierte Strategien für E-Mail, Namen, Telefonnummern, Adressen, IP-Adressen und mehr
+- **Mehrere Anonymisierungsstrategien**: Vordefinierte Strategien für E-Mail, Namen, Telefonnummern, Adressen,
+  IP-Adressen und mehr
 - **Anpassbare Optionen**: Konfigurieren Sie jede Anonymisierungsstrategie nach Ihren Bedürfnissen
 - **Attribut-basierte Anonymisierung**: Verwenden Sie PHP-Attribute, um Felder in Ihren Modellklassen zu kennzeichnen
 - **Middleware-Unterstützung**: Automatische API-Antwort-Anonymisierung
@@ -140,17 +142,17 @@ $filePath = $gdprService->saveExportToJson(
 
 ## Verfügbare Anonymisierungsstrategien
 
-| Strategie | Beschreibung | Optionen |
-|-----------|--------------|----------|
-| `email` | Anonymisiert E-Mail-Adressen | `preserve_domain`: Behalte Domain bei (Standard: true) |
-| `name` | Anonymisiert Namen | `preserve_first_char`: Behalte ersten Buchstaben (Standard: true)<br>`placeholder`: Zu verwendendes Platzhalterzeichen (Standard: ****) |
-| `phone` | Anonymisiert Telefonnummern | `visible_digits`: Anzahl der sichtbaren Ziffern am Ende (Standard: 3) |
-| `address` | Anonymisiert Adressen | `preserve_postal_code`: Behalte Postleitzahl bei (Standard: true) |
-| `ip` | Anonymisiert IP-Adressen | `method`: Anonymisierungsmethode ('partial' oder 'full') (Standard: partial) |
-| `credit_card` | Anonymisiert Kreditkartennummern | `visible_digits`: Anzahl der sichtbaren Ziffern am Ende (Standard: 4) |
-| `hash` | Erstellt Hash-Werte (deterministisch) | `algorithm`: Zu verwendender Hash-Algorithmus (Standard: xxh3)<br>`salt`: Salt für den Hash (Standard: '')<br>`length`: Maximale Länge des Hashes (Standard: 0 = unbegrenzt) |
-| `random` | Erzeugt zufällige Werte | `length`: Länge des zufälligen Strings (Standard: 10)<br>`characters`: Zu verwendende Zeichen |
-| `null` | Ersetzt Werte durch NULL | - |
+| Strategie     | Beschreibung                          | Optionen                                                                                                                                                                     |
+|---------------|---------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `email`       | Anonymisiert E-Mail-Adressen          | `preserve_domain`: Behalte Domain bei (Standard: true)                                                                                                                       |
+| `name`        | Anonymisiert Namen                    | `preserve_first_char`: Behalte ersten Buchstaben (Standard: true)<br>`placeholder`: Zu verwendendes Platzhalterzeichen (Standard: ****)                                      |
+| `phone`       | Anonymisiert Telefonnummern           | `visible_digits`: Anzahl der sichtbaren Ziffern am Ende (Standard: 3)                                                                                                        |
+| `address`     | Anonymisiert Adressen                 | `preserve_postal_code`: Behalte Postleitzahl bei (Standard: true)                                                                                                            |
+| `ip`          | Anonymisiert IP-Adressen              | `method`: Anonymisierungsmethode ('partial' oder 'full') (Standard: partial)                                                                                                 |
+| `credit_card` | Anonymisiert Kreditkartennummern      | `visible_digits`: Anzahl der sichtbaren Ziffern am Ende (Standard: 4)                                                                                                        |
+| `hash`        | Erstellt Hash-Werte (deterministisch) | `algorithm`: Zu verwendender Hash-Algorithmus (Standard: xxh3)<br>`salt`: Salt für den Hash (Standard: '')<br>`length`: Maximale Länge des Hashes (Standard: 0 = unbegrenzt) |
+| `random`      | Erzeugt zufällige Werte               | `length`: Länge des zufälligen Strings (Standard: 10)<br>`characters`: Zu verwendende Zeichen                                                                                |
+| `null`        | Ersetzt Werte durch NULL              | -                                                                                                                                                                            |
 
 ## Eigene Anonymisierungsstrategien registrieren
 
@@ -173,9 +175,12 @@ $anonymizer->registerStrategy('coordinates', function(string $value, array $opti
 
 ## Bewährte Praktiken
 
-1. **Speichern Sie immer die Originaldaten**: Die Anonymisierung sollte nur für die Anzeige/Export angewendet werden, nicht für die Speicherung.
-2. **Schichten Sie die Anonymisierung**: Verwenden Sie unterschiedliche Anonymisierungsstufen für verschiedene Benutzerrollen.
-3. **Verwenden Sie Attribut-basierte Anonymisierung** für Modelle, um konsistentes Verhalten über das gesamte System zu gewährleisten.
+1. **Speichern Sie immer die Originaldaten**: Die Anonymisierung sollte nur für die Anzeige/Export angewendet werden,
+   nicht für die Speicherung.
+2. **Schichten Sie die Anonymisierung**: Verwenden Sie unterschiedliche Anonymisierungsstufen für verschiedene
+   Benutzerrollen.
+3. **Verwenden Sie Attribut-basierte Anonymisierung** für Modelle, um konsistentes Verhalten über das gesamte System zu
+   gewährleisten.
 4. **Cachen Sie anonymisierte Daten nicht**, wenn die Anonymisierungsstufe vom Benutzerkontext abhängt.
 5. **Loggen Sie Anonymisierungsaktivitäten**, um Datenschutzprüfungen zu unterstützen.
 

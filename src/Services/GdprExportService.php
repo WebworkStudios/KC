@@ -3,9 +3,11 @@
 
 namespace Src\Services;
 
+use RuntimeException;
 use Src\Database\Anonymization\AnonymizationService;
 use Src\Log\LoggerInterface;
 use Src\Log\NullLogger;
+use Throwable;
 
 /**
  * Service für DSGVO-konforme Datenexporte mit automatischer Anonymisierung
@@ -142,7 +144,7 @@ class GdprExportService
                     'source' => $sourceName,
                     'records' => is_array($data) ? (isset($data[0]) ? count($data) : 1) : 'nicht zählbar'
                 ]);
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 $this->logger->error("Fehler beim Exportieren einer Datenquelle", [
                     'source' => $sourceName,
                     'error' => $e->getMessage(),
@@ -177,7 +179,7 @@ class GdprExportService
     {
         // Sicherstellen, dass das Verzeichnis existiert
         if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
-            throw new \RuntimeException("Das Verzeichnis '$directory' konnte nicht erstellt werden");
+            throw new RuntimeException("Das Verzeichnis '$directory' konnte nicht erstellt werden");
         }
 
         // Dateinamen generieren, wenn nicht angegeben
@@ -194,13 +196,13 @@ class GdprExportService
         $json = json_encode($exportData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         if ($json === false) {
-            throw new \RuntimeException("Fehler beim Kodieren der Daten als JSON: " . json_last_error_msg());
+            throw new RuntimeException("Fehler beim Kodieren der Daten als JSON: " . json_last_error_msg());
         }
 
         $bytesWritten = file_put_contents($filePath, $json);
 
         if ($bytesWritten === false) {
-            throw new \RuntimeException("Fehler beim Schreiben der Datei: $filePath");
+            throw new RuntimeException("Fehler beim Schreiben der Datei: $filePath");
         }
 
         $this->logger->info("DSGVO-Datenexport als JSON gespeichert", [

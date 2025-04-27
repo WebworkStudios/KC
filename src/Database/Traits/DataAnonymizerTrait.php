@@ -29,9 +29,10 @@ trait DataAnonymizerTrait
      */
     public function toAnonymizedArray(
         ?AnonymizationService $anonymizer = null,
-        array $additionalFields = [],
-        array $excludeFields = []
-    ): array {
+        array                 $additionalFields = [],
+        array                 $excludeFields = []
+    ): array
+    {
         // Wenn kein Anonymisierer übergeben wurde, einen neuen erstellen
         $anonymizer = $anonymizer ?? new AnonymizationService();
 
@@ -67,6 +68,31 @@ trait DataAnonymizerTrait
             $options = is_array($config) && isset($config['options']) ? $config['options'] : [];
 
             $data[$field] = $anonymizer->anonymize($data[$field], $strategy, $options);
+        }
+
+        return $data;
+    }
+
+    /**
+     * Konvertiert das Objekt in ein Array
+     *
+     * Diese Methode muss von der implementierenden Klasse bereitgestellt werden,
+     * falls sie nicht bereits existiert.
+     *
+     * @return array
+     */
+    public function toArray(): array
+    {
+        $data = [];
+        $reflection = new ReflectionClass($this);
+
+        foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
+            if ($property->isStatic()) {
+                continue;
+            }
+
+            $name = $property->getName();
+            $data[$name] = $property->getValue($this);
         }
 
         return $data;
@@ -113,30 +139,5 @@ trait DataAnonymizerTrait
         self::$anonymizableFields[$class] = $fields;
 
         return $fields;
-    }
-
-    /**
-     * Konvertiert das Objekt in ein Array
-     *
-     * Diese Methode muss von der implementierenden Klasse bereitgestellt werden,
-     * falls sie nicht bereits existiert.
-     *
-     * @return array
-     */
-    public function toArray(): array
-    {
-        $data = [];
-        $reflection = new ReflectionClass($this);
-
-        foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
-            if ($property->isStatic()) {
-                continue;
-            }
-
-            $name = $property->getName();
-            $data[$name] = $property->getValue($this);
-        }
-
-        return $data;
     }
 }

@@ -21,8 +21,9 @@ class Server
         private readonly string $host,
         private readonly string $username,
         private readonly string $password,
-        private readonly int $port = 3306
-    ) {
+        private readonly int    $port = 3306
+    )
+    {
     }
 
     /**

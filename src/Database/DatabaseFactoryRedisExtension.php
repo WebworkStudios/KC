@@ -5,10 +5,10 @@ namespace Src\Database;
 use Redis;
 use RuntimeException;
 use Src\Database\Cache\RedisCache;
-use Src\Database\Cache\CacheInterface;
 use Src\Database\Enums\ConnectionMode;
 use Src\Log\LoggerInterface;
 use Src\Log\NullLogger;
+use Throwable;
 
 /**
  * Erweiterung der DatabaseFactory für Redis-Cache-Integration
@@ -19,6 +19,36 @@ use Src\Log\NullLogger;
 class DatabaseFactoryRedisExtension
 {
     /**
+     * Erstellt einen QueryBuilder mit Redis-Cache
+     *
+     * @param string $connectionName Name der Datenbankverbindung
+     * @param array $redisConfig Redis-Konfiguration
+     * @param string|null $table Optionaler Tabellenname
+     * @param LoggerInterface|null $logger Optional: Logger für Datenbankoperationen
+     * @param string $cacheName Optional: Name für die Cache-Registrierung
+     * @return QueryBuilder QueryBuilder-Instanz mit Redis-Cache
+     */
+    public static function createQueryBuilderWithRedisCache(
+        string           $connectionName,
+        array            $redisConfig,
+        ?string          $table = null,
+        ?LoggerInterface $logger = null,
+        string           $cacheName = 'redis_cache'
+    ): QueryBuilder
+    {
+        // Redis-Cache erstellen und registrieren
+        $cache = self::createRedisCache($cacheName, $redisConfig, $logger);
+
+        // QueryBuilder mit Cache erstellen
+        return DatabaseFactory::createQueryBuilder(
+            connectionName: $connectionName,
+            table: $table,
+            logger: $logger,
+            cache: $cache
+        );
+    }
+
+    /**
      * Erstellt und registriert einen Redis-Cache-Provider
      *
      * @param string $name Name für die Cache-Registrierung
@@ -28,10 +58,11 @@ class DatabaseFactoryRedisExtension
      * @throws RuntimeException Wenn die Redis-Erweiterung nicht verfügbar ist oder Verbindung fehlschlägt
      */
     public static function createRedisCache(
-        string $name,
-        array $config = [],
+        string           $name,
+        array            $config = [],
         ?LoggerInterface $logger = null
-    ): RedisCache {
+    ): RedisCache
+    {
         if (!extension_loaded('redis')) {
             throw new RuntimeException('Die Redis-Erweiterung ist nicht verfügbar');
         }
@@ -62,7 +93,7 @@ class DatabaseFactoryRedisExtension
             if (!$connected) {
                 throw new RuntimeException("Konnte keine Verbindung zum Redis-Server herstellen: $host:$port");
             }
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $logger->error("Redis-Verbindungsfehler: " . $e->getMessage(), [
                 'host' => $host,
                 'port' => $port,
@@ -86,35 +117,6 @@ class DatabaseFactoryRedisExtension
     }
 
     /**
-     * Erstellt einen QueryBuilder mit Redis-Cache
-     *
-     * @param string $connectionName Name der Datenbankverbindung
-     * @param array $redisConfig Redis-Konfiguration
-     * @param string|null $table Optionaler Tabellenname
-     * @param LoggerInterface|null $logger Optional: Logger für Datenbankoperationen
-     * @param string $cacheName Optional: Name für die Cache-Registrierung
-     * @return QueryBuilder QueryBuilder-Instanz mit Redis-Cache
-     */
-    public static function createQueryBuilderWithRedisCache(
-        string $connectionName,
-        array $redisConfig,
-        ?string $table = null,
-        ?LoggerInterface $logger = null,
-        string $cacheName = 'redis_cache'
-    ): QueryBuilder {
-        // Redis-Cache erstellen und registrieren
-        $cache = self::createRedisCache($cacheName, $redisConfig, $logger);
-
-        // QueryBuilder mit Cache erstellen
-        return DatabaseFactory::createQueryBuilder(
-            connectionName: $connectionName,
-            table: $table,
-            logger: $logger,
-            cache: $cache
-        );
-    }
-
-    /**
      * Konfiguriert eine Datenbankverbindung mit Redis-Cache
      *
      * @param string $name Name der Datenbankverbindung
@@ -128,15 +130,16 @@ class DatabaseFactoryRedisExtension
      * @return ConnectionManager ConnectionManager-Instanz
      */
     public static function configureConnectionWithRedisCache(
-        string $name,
-        string $database,
-        array $servers,
-        array $redisConfig,
-        ?LoggerInterface $logger = null,
+        string                $name,
+        string                $database,
+        array                 $servers,
+        array                 $redisConfig,
+        ?LoggerInterface      $logger = null,
         LoadBalancingStrategy $loadBalancingStrategy = LoadBalancingStrategy::ROUND_ROBIN,
-        ConnectionMode $defaultMode = ConnectionMode::READ,
-        string $cacheName = 'redis_cache'
-    ): ConnectionManager {
+        ConnectionMode        $defaultMode = ConnectionMode::READ,
+        string                $cacheName = 'redis_cache'
+    ): ConnectionManager
+    {
         // Datenbankverbindung konfigurieren
         $connectionManager = DatabaseFactory::configureConnection(
             name: $name,

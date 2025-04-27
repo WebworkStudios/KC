@@ -26,10 +26,33 @@ class ConnectionConfig
      * @param ConnectionMode $defaultMode Standardmodus für Verbindungen
      */
     public function __construct(
-        private readonly string $database,
+        private readonly string                $database,
         private readonly LoadBalancingStrategy $loadBalancingStrategy = LoadBalancingStrategy::ROUND_ROBIN,
-        private readonly ConnectionMode $defaultMode = ConnectionMode::READ
-    ) {
+        private readonly ConnectionMode        $defaultMode = ConnectionMode::READ
+    )
+    {
+    }
+
+    /**
+     * Fügt einen primären Server hinzu (für Schreib- und Leseoperationen)
+     *
+     * @param string $name Name des Servers
+     * @param string $host Hostname
+     * @param string $username Benutzername
+     * @param string $password Passwort
+     * @param int $port Port (Standard: 3306)
+     * @return self
+     */
+    public function addPrimaryServer(
+        string $name,
+        string $host,
+        string $username,
+        string $password,
+        int    $port = 3306
+    ): self
+    {
+        $server = new Server($name, $host, $username, $password, $port);
+        return $this->addServer($server, true, true);
     }
 
     /**
@@ -56,27 +79,6 @@ class ConnectionConfig
     }
 
     /**
-     * Fügt einen primären Server hinzu (für Schreib- und Leseoperationen)
-     *
-     * @param string $name Name des Servers
-     * @param string $host Hostname
-     * @param string $username Benutzername
-     * @param string $password Passwort
-     * @param int $port Port (Standard: 3306)
-     * @return self
-     */
-    public function addPrimaryServer(
-        string $name,
-        string $host,
-        string $username,
-        string $password,
-        int $port = 3306
-    ): self {
-        $server = new Server($name, $host, $username, $password, $port);
-        return $this->addServer($server, true, true);
-    }
-
-    /**
      * Fügt einen Read-Only-Server hinzu (nur für Leseoperationen)
      *
      * @param string $name Name des Servers
@@ -91,8 +93,9 @@ class ConnectionConfig
         string $host,
         string $username,
         string $password,
-        int $port = 3306
-    ): self {
+        int    $port = 3306
+    ): self
+    {
         $server = new Server($name, $host, $username, $password, $port);
         return $this->addServer($server, false, true);
     }

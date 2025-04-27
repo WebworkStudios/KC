@@ -4,6 +4,7 @@ namespace Src\Database;
 
 use Closure;
 use Exception;
+use Src\Log\NullLogger;
 use Throwable;
 
 /**
@@ -42,9 +43,126 @@ class Future
     public function __construct(QueryBuilder $query)
     {
         // Ergebnis der get()-Methode als Executor-Closure speichern
-        $this->executor = function() use ($query) {
+        $this->executor = function () use ($query) {
             return $query->get();
         };
+    }
+
+    /**
+     * Führt die Abfrage aus, falls noch nicht geschehen
+     *
+     * @return T Ergebnis der Abfrage
+     * @throws Throwable Bei Fehlern während der Ausführung
+     */
+    public function get(): mixed
+    {
+        // Wenn bereits ausgeführt, direkt das Ergebnis zurückgeben oder den Fehler werfen
+        if ($this->isExecuted) {
+            if ($this->error !== null) {
+                throw $this->error;
+            }
+
+            return $this->result;
+        }
+
+        // Abfrage ausführen
+        try {
+            $this->result = ($this->executor)();
+
+            // Erfolg-Callbacks aufrufen
+            foreach ($this->successCallbacks as $callback) {
+                $callback($this->result);
+            }
+        } catch (Throwable $e) {
+            $this->error = $e;
+
+            // Fehler-Callbacks aufrufen
+            foreach ($this->failureCallbacks as $callback) {
+                $callback($e);
+            }
+
+            // Wenn keine Fehler-Callbacks registriert wurden, Fehler werfen
+            if (empty($this->failureCallbacks)) {
+                throw $e;
+            }
+        } finally {
+            $this->isExecuted = true;
+
+            // Finally-Callbacks aufrufen
+            foreach ($this->finallyCallbacks as $callback) {
+                $callback();
+            }
+        }
+
+        return $this->result;
+    }
+
+    /**
+     * Erstellt eine neue Future-Instanz mit einem angepassten Executor
+     *
+     * @param Closure(): T $executor Executor-Funktion
+     * @return self Neue Future-Instanz
+     */
+    public static function create(Closure $executor): self
+    {
+        $future = new self(new QueryBuilder(
+        // Dummy QueryBuilder ohne echte Funktionalität, nur um den Konstruktor zu erfüllen
+        // Der tatsächliche Code wird vom bereitgestellten Executor ausgeführt
+            new ConnectionManager(new NullLogger()),
+            'dummy',
+            new NullLogger()
+        ));
+
+        // Executor überschreiben
+        $future->executor = $executor;
+
+        return $future;
+    }
+
+    /**
+     * Wartet auf die Ausführung mehrerer Futures
+     *
+     * @param array<Future> $futures Array von Future-Instanzen
+     * @return array Array mit den Ergebnissen der Futures
+     * @throws Throwable Bei Fehlern während der Ausführung
+     */
+    public static function all(array $futures): array
+    {
+        $results = [];
+
+        foreach ($futures as $key => $future) {
+            $results[$key] = $future->get();
+        }
+
+        return $results;
+    }
+
+    /**
+     * Führt die erste erfolgreiche Future aus mehreren aus
+     *
+     * @param array<Future> $futures Array von Future-Instanzen
+     * @return mixed Ergebnis der ersten erfolgreichen Future
+     * @throws Throwable Wenn alle Futures fehlschlagen
+     */
+    public static function any(array $futures): mixed
+    {
+        $lastError = null;
+
+        foreach ($futures as $future) {
+            try {
+                return $future->get();
+            } catch (Throwable $e) {
+                $lastError = $e;
+            }
+        }
+
+        // Wenn alle Futures fehlschlagen, den letzten Fehler werfen
+        if ($lastError !== null) {
+            throw new Exception("Alle Futures sind fehlgeschlagen: " . $lastError->getMessage(), 0, $lastError);
+        }
+
+        // Sollte nie erreicht werden, da mindestens ein Future in $futures sein sollte
+        throw new Exception("Keine Futures angegeben");
     }
 
     /**
@@ -102,55 +220,6 @@ class Future
     }
 
     /**
-     * Führt die Abfrage aus, falls noch nicht geschehen
-     *
-     * @return T Ergebnis der Abfrage
-     * @throws Throwable Bei Fehlern während der Ausführung
-     */
-    public function get(): mixed
-    {
-        // Wenn bereits ausgeführt, direkt das Ergebnis zurückgeben oder den Fehler werfen
-        if ($this->isExecuted) {
-            if ($this->error !== null) {
-                throw $this->error;
-            }
-
-            return $this->result;
-        }
-
-        // Abfrage ausführen
-        try {
-            $this->result = ($this->executor)();
-
-            // Erfolg-Callbacks aufrufen
-            foreach ($this->successCallbacks as $callback) {
-                $callback($this->result);
-            }
-        } catch (Throwable $e) {
-            $this->error = $e;
-
-            // Fehler-Callbacks aufrufen
-            foreach ($this->failureCallbacks as $callback) {
-                $callback($e);
-            }
-
-            // Wenn keine Fehler-Callbacks registriert wurden, Fehler werfen
-            if (empty($this->failureCallbacks)) {
-                throw $e;
-            }
-        } finally {
-            $this->isExecuted = true;
-
-            // Finally-Callbacks aufrufen
-            foreach ($this->finallyCallbacks as $callback) {
-                $callback();
-            }
-        }
-
-        return $this->result;
-    }
-
-    /**
      * Prüft, ob die Abfrage bereits ausgeführt wurde
      *
      * @return bool True, wenn die Abfrage bereits ausgeführt wurde
@@ -178,73 +247,5 @@ class Future
     public function getError(): ?Throwable
     {
         return $this->error;
-    }
-
-    /**
-     * Erstellt eine neue Future-Instanz mit einem angepassten Executor
-     *
-     * @param Closure(): T $executor Executor-Funktion
-     * @return self Neue Future-Instanz
-     */
-    public static function create(Closure $executor): self
-    {
-        $future = new self(new QueryBuilder(
-        // Dummy QueryBuilder ohne echte Funktionalität, nur um den Konstruktor zu erfüllen
-        // Der tatsächliche Code wird vom bereitgestellten Executor ausgeführt
-            new ConnectionManager(new \Src\Log\NullLogger()),
-            'dummy',
-            new \Src\Log\NullLogger()
-        ));
-
-        // Executor überschreiben
-        $future->executor = $executor;
-
-        return $future;
-    }
-
-    /**
-     * Wartet auf die Ausführung mehrerer Futures
-     *
-     * @param array<Future> $futures Array von Future-Instanzen
-     * @return array Array mit den Ergebnissen der Futures
-     * @throws Throwable Bei Fehlern während der Ausführung
-     */
-    public static function all(array $futures): array
-    {
-        $results = [];
-
-        foreach ($futures as $key => $future) {
-            $results[$key] = $future->get();
-        }
-
-        return $results;
-    }
-
-    /**
-     * Führt die erste erfolgreiche Future aus mehreren aus
-     *
-     * @param array<Future> $futures Array von Future-Instanzen
-     * @return mixed Ergebnis der ersten erfolgreichen Future
-     * @throws Throwable Wenn alle Futures fehlschlagen
-     */
-    public static function any(array $futures): mixed
-    {
-        $lastError = null;
-
-        foreach ($futures as $future) {
-            try {
-                return $future->get();
-            } catch (Throwable $e) {
-                $lastError = $e;
-            }
-        }
-
-        // Wenn alle Futures fehlschlagen, den letzten Fehler werfen
-        if ($lastError !== null) {
-            throw new Exception("Alle Futures sind fehlgeschlagen: " . $lastError->getMessage(), 0, $lastError);
-        }
-
-        // Sollte nie erreicht werden, da mindestens ein Future in $futures sein sollte
-        throw new Exception("Keine Futures angegeben");
     }
 }

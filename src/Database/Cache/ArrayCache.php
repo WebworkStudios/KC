@@ -19,28 +19,10 @@ class ArrayCache implements CacheInterface
     /**
      * {@inheritDoc}
      */
-    public function set(string $key, mixed $value, ?int $ttl = null, array $tags = []): bool
+    public function clear(): bool
     {
-        // Ablaufzeit berechnen
-        $expiry = $ttl !== null ? time() + $ttl : null;
-
-        // Wert speichern
-        $this->items[$key] = [
-            'value' => $value,
-            'expiry' => $expiry,
-            'tags' => $tags
-        ];
-
-        // Tags aktualisieren
-        foreach ($tags as $tag) {
-            if (!isset($this->tags[$tag])) {
-                $this->tags[$tag] = [];
-            }
-
-            if (!in_array($key, $this->tags[$tag])) {
-                $this->tags[$tag][] = $key;
-            }
-        }
+        $this->items = [];
+        $this->tags = [];
 
         return true;
     }
@@ -48,33 +30,19 @@ class ArrayCache implements CacheInterface
     /**
      * {@inheritDoc}
      */
-    public function get(string $key): mixed
+    public function invalidateByTag(string $tag): bool
     {
-        // Prüfen, ob der Schlüssel existiert und nicht abgelaufen ist
-        if (!$this->has($key)) {
-            return null;
-        }
-
-        return $this->items[$key]['value'];
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function has(string $key): bool
-    {
-        // Prüfen, ob der Schlüssel existiert
-        if (!isset($this->items[$key])) {
+        if (!isset($this->tags[$tag])) {
             return false;
         }
 
-        // Prüfen, ob der Eintrag abgelaufen ist
-        $expiry = $this->items[$key]['expiry'];
-        if ($expiry !== null && $expiry < time()) {
-            // Abgelaufenen Eintrag löschen
+        // Alle Einträge mit diesem Tag löschen
+        foreach ($this->tags[$tag] as $key) {
             $this->delete($key);
-            return false;
         }
+
+        // Tag aus der Verwaltung entfernen
+        unset($this->tags[$tag]);
 
         return true;
     }
@@ -113,37 +81,6 @@ class ArrayCache implements CacheInterface
     /**
      * {@inheritDoc}
      */
-    public function clear(): bool
-    {
-        $this->items = [];
-        $this->tags = [];
-
-        return true;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function invalidateByTag(string $tag): bool
-    {
-        if (!isset($this->tags[$tag])) {
-            return false;
-        }
-
-        // Alle Einträge mit diesem Tag löschen
-        foreach ($this->tags[$tag] as $key) {
-            $this->delete($key);
-        }
-
-        // Tag aus der Verwaltung entfernen
-        unset($this->tags[$tag]);
-
-        return true;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
     public function remember(string $key, callable $callback, ?int $ttl = null, array $tags = []): mixed
     {
         // Prüfen, ob der Wert bereits im Cache ist
@@ -158,6 +95,69 @@ class ArrayCache implements CacheInterface
         $this->set($key, $value, $ttl, $tags);
 
         return $value;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function has(string $key): bool
+    {
+        // Prüfen, ob der Schlüssel existiert
+        if (!isset($this->items[$key])) {
+            return false;
+        }
+
+        // Prüfen, ob der Eintrag abgelaufen ist
+        $expiry = $this->items[$key]['expiry'];
+        if ($expiry !== null && $expiry < time()) {
+            // Abgelaufenen Eintrag löschen
+            $this->delete($key);
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function get(string $key): mixed
+    {
+        // Prüfen, ob der Schlüssel existiert und nicht abgelaufen ist
+        if (!$this->has($key)) {
+            return null;
+        }
+
+        return $this->items[$key]['value'];
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function set(string $key, mixed $value, ?int $ttl = null, array $tags = []): bool
+    {
+        // Ablaufzeit berechnen
+        $expiry = $ttl !== null ? time() + $ttl : null;
+
+        // Wert speichern
+        $this->items[$key] = [
+            'value' => $value,
+            'expiry' => $expiry,
+            'tags' => $tags
+        ];
+
+        // Tags aktualisieren
+        foreach ($tags as $tag) {
+            if (!isset($this->tags[$tag])) {
+                $this->tags[$tag] = [];
+            }
+
+            if (!in_array($key, $this->tags[$tag])) {
+                $this->tags[$tag][] = $key;
+            }
+        }
+
+        return true;
     }
 
     /**

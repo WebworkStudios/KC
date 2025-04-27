@@ -2,15 +2,82 @@
 
 namespace Src\Database\Traits;
 
-use PDO;
 use Closure;
+use PDOException;
 use Src\Database\Exceptions\TransactionException;
+use Throwable;
 
 /**
  * Trait für Transaktions-Support im QueryBuilder
  */
 trait TransactionTrait
 {
+    /**
+     * Führt eine Closure innerhalb einer Transaktion aus
+     *
+     * @param Closure $callback Auszuführender Code
+     * @return mixed Rückgabewert der Closure
+     * @throws TransactionException Bei Fehlern mit der Transaktion
+     * @throws Throwable Bei Fehlern im Callback
+     */
+    public function transaction(Closure $callback): mixed
+    {
+        $connection = $this->connectionManager->getConnection($this->connectionName, true);
+
+        // Verschachtelter Transaktionsaufruf - direkter Callback-Aufruf ohne neue Transaktion
+        if ($connection->inTransaction()) {
+            $this->logger->debug("Verschachtelter Transaktionsaufruf - verwende bestehende Transaktion", [
+                'connection' => $this->connectionName
+            ]);
+
+            return $callback($this);
+        }
+
+        // Neue Transaktion starten
+        $this->beginTransaction();
+
+        try {
+            // Callback ausführen
+            $result = $callback($this);
+
+            // Transaktion committen
+            $this->commit();
+
+            return $result;
+        } catch (Throwable $e) {
+            // Bei Fehlern Rollback durchführen
+            $this->rollback();
+
+            $this->logger->error("Fehler in Transaktion, Rollback durchgeführt", [
+                'connection' => $this->connectionName,
+                'error' => $e->getMessage(),
+                'exception' => get_class($e)
+            ]);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Überprüft, ob eine Transaktion aktiv ist
+     *
+     * @return bool True, wenn eine Transaktion aktiv ist
+     */
+    public function inTransaction(): bool
+    {
+        try {
+            $connection = $this->connectionManager->getConnection($this->connectionName, true);
+            return $connection->inTransaction();
+        } catch (PDOException $e) {
+            $this->logger->error("Fehler beim Prüfen des Transaktionsstatus", [
+                'connection' => $this->connectionName,
+                'error' => $e->getMessage()
+            ]);
+
+            return false;
+        }
+    }
+
     /**
      * Beginnt eine neue Transaktion
      *
@@ -37,7 +104,7 @@ trait TransactionTrait
             ]);
 
             return $result;
-        } catch (\PDOException $e) {
+        } catch (PDOException $e) {
             $this->logger->error("Fehler beim Starten der Transaktion", [
                 'connection' => $this->connectionName,
                 'error' => $e->getMessage()
@@ -48,26 +115,6 @@ trait TransactionTrait
                 $e->getCode(),
                 $e
             );
-        }
-    }
-
-    /**
-     * Überprüft, ob eine Transaktion aktiv ist
-     *
-     * @return bool True, wenn eine Transaktion aktiv ist
-     */
-    public function inTransaction(): bool
-    {
-        try {
-            $connection = $this->connectionManager->getConnection($this->connectionName, true);
-            return $connection->inTransaction();
-        } catch (\PDOException $e) {
-            $this->logger->error("Fehler beim Prüfen des Transaktionsstatus", [
-                'connection' => $this->connectionName,
-                'error' => $e->getMessage()
-            ]);
-
-            return false;
         }
     }
 
@@ -97,7 +144,7 @@ trait TransactionTrait
             ]);
 
             return $result;
-        } catch (\PDOException $e) {
+        } catch (PDOException $e) {
             $this->logger->error("Fehler beim Committen der Transaktion", [
                 'connection' => $this->connectionName,
                 'error' => $e->getMessage()
@@ -137,7 +184,7 @@ trait TransactionTrait
             ]);
 
             return $result;
-        } catch (\PDOException $e) {
+        } catch (PDOException $e) {
             $this->logger->error("Fehler beim Rollback der Transaktion", [
                 'connection' => $this->connectionName,
                 'error' => $e->getMessage()
@@ -148,52 +195,6 @@ trait TransactionTrait
                 $e->getCode(),
                 $e
             );
-        }
-    }
-
-    /**
-     * Führt eine Closure innerhalb einer Transaktion aus
-     *
-     * @param Closure $callback Auszuführender Code
-     * @return mixed Rückgabewert der Closure
-     * @throws TransactionException Bei Fehlern mit der Transaktion
-     * @throws \Throwable Bei Fehlern im Callback
-     */
-    public function transaction(Closure $callback): mixed
-    {
-        $connection = $this->connectionManager->getConnection($this->connectionName, true);
-
-        // Verschachtelter Transaktionsaufruf - direkter Callback-Aufruf ohne neue Transaktion
-        if ($connection->inTransaction()) {
-            $this->logger->debug("Verschachtelter Transaktionsaufruf - verwende bestehende Transaktion", [
-                'connection' => $this->connectionName
-            ]);
-
-            return $callback($this);
-        }
-
-        // Neue Transaktion starten
-        $this->beginTransaction();
-
-        try {
-            // Callback ausführen
-            $result = $callback($this);
-
-            // Transaktion committen
-            $this->commit();
-
-            return $result;
-        } catch (\Throwable $e) {
-            // Bei Fehlern Rollback durchführen
-            $this->rollback();
-
-            $this->logger->error("Fehler in Transaktion, Rollback durchgeführt", [
-                'connection' => $this->connectionName,
-                'error' => $e->getMessage(),
-                'exception' => get_class($e)
-            ]);
-
-            throw $e;
         }
     }
 
@@ -226,7 +227,7 @@ trait TransactionTrait
             ]);
 
             return true;
-        } catch (\PDOException $e) {
+        } catch (PDOException $e) {
             $this->logger->error("Fehler beim Setzen des Savepoints", [
                 'connection' => $this->connectionName,
                 'savepoint' => $name,
@@ -239,6 +240,18 @@ trait TransactionTrait
                 $e
             );
         }
+    }
+
+    /**
+     * Escapet den Namen eines Savepoints für die sichere Verwendung in SQL
+     *
+     * @param string $name Savepoint-Name
+     * @return string Escapeter Name
+     */
+    private function escapeSavepointName(string $name): string
+    {
+        // Nur alphanumerische Zeichen und Unterstriche erlauben
+        return preg_replace('/[^a-zA-Z0-9_]/', '', $name);
     }
 
     /**
@@ -270,7 +283,7 @@ trait TransactionTrait
             ]);
 
             return true;
-        } catch (\PDOException $e) {
+        } catch (PDOException $e) {
             $this->logger->error("Fehler beim Zurückkehren zum Savepoint", [
                 'connection' => $this->connectionName,
                 'savepoint' => $name,
@@ -314,7 +327,7 @@ trait TransactionTrait
             ]);
 
             return true;
-        } catch (\PDOException $e) {
+        } catch (PDOException $e) {
             $this->logger->error("Fehler beim Freigeben des Savepoints", [
                 'connection' => $this->connectionName,
                 'savepoint' => $name,
@@ -327,17 +340,5 @@ trait TransactionTrait
                 $e
             );
         }
-    }
-
-    /**
-     * Escapet den Namen eines Savepoints für die sichere Verwendung in SQL
-     *
-     * @param string $name Savepoint-Name
-     * @return string Escapeter Name
-     */
-    private function escapeSavepointName(string $name): string
-    {
-        // Nur alphanumerische Zeichen und Unterstriche erlauben
-        return preg_replace('/[^a-zA-Z0-9_]/', '', $name);
     }
 }

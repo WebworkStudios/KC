@@ -2,7 +2,6 @@
 
 namespace Src\Database\Traits;
 
-use InvalidArgumentException;
 use Src\Database\Anonymization\AnonymizationService;
 
 /**
@@ -42,23 +41,6 @@ trait QueryBuilderAnonymizationTrait
     }
 
     /**
-     * Deaktiviert die Anonymisierung
-     *
-     * @return self
-     */
-    public function withoutAnonymization(): self
-    {
-        $this->anonymizationEnabled = false;
-
-        $this->logger->debug("Anonymisierung deaktiviert", [
-            'connection' => $this->connectionName,
-            'table' => $this->table
-        ]);
-
-        return $this;
-    }
-
-    /**
      * Gibt die AnonymizationService-Instanz zurück
      *
      * @return AnonymizationService
@@ -73,33 +55,20 @@ trait QueryBuilderAnonymizationTrait
     }
 
     /**
-     * Führt die Anonymisierung auf einem Ergebnisdatensatz durch
+     * Deaktiviert die Anonymisierung
      *
-     * @param array $data Zu anonymisierender Datensatz
-     * @return array Anonymisierter Datensatz
+     * @return self
      */
-    private function applyAnonymization(array $data): array
+    public function withoutAnonymization(): self
     {
-        if (!$this->anonymizationEnabled || empty($this->anonymizeFields) || empty($data)) {
-            return $data;
-        }
+        $this->anonymizationEnabled = false;
 
-        return $this->getAnonymizationService()->anonymizeData($data, $this->anonymizeFields);
-    }
+        $this->logger->debug("Anonymisierung deaktiviert", [
+            'connection' => $this->connectionName,
+            'table' => $this->table
+        ]);
 
-    /**
-     * Führt die Anonymisierung auf einem Ergebnisset durch
-     *
-     * @param array $dataSet Zu anonymisierendes Datenset
-     * @return array Anonymisiertes Datenset
-     */
-    private function applyAnonymizationToDataSet(array $dataSet): array
-    {
-        if (!$this->anonymizationEnabled || empty($this->anonymizeFields) || empty($dataSet)) {
-            return $dataSet;
-        }
-
-        return $this->getAnonymizationService()->anonymizeDataSet($dataSet, $this->anonymizeFields);
+        return $this;
     }
 
     /**
@@ -128,6 +97,21 @@ trait QueryBuilderAnonymizationTrait
     }
 
     /**
+     * Führt die Anonymisierung auf einem Ergebnisset durch
+     *
+     * @param array $dataSet Zu anonymisierendes Datenset
+     * @return array Anonymisiertes Datenset
+     */
+    private function applyAnonymizationToDataSet(array $dataSet): array
+    {
+        if (!$this->anonymizationEnabled || empty($this->anonymizeFields) || empty($dataSet)) {
+            return $dataSet;
+        }
+
+        return $this->getAnonymizationService()->anonymizeDataSet($dataSet, $this->anonymizeFields);
+    }
+
+    /**
      * Überschreibt die first()-Methode, um Anonymisierung anzuwenden
      *
      * HINWEIS: Diese Methode muss im QueryBuilder aufgerufen werden, nachdem
@@ -149,5 +133,20 @@ trait QueryBuilderAnonymizationTrait
         ]);
 
         return $this->applyAnonymization($result);
+    }
+
+    /**
+     * Führt die Anonymisierung auf einem Ergebnisdatensatz durch
+     *
+     * @param array $data Zu anonymisierender Datensatz
+     * @return array Anonymisierter Datensatz
+     */
+    private function applyAnonymization(array $data): array
+    {
+        if (!$this->anonymizationEnabled || empty($this->anonymizeFields) || empty($data)) {
+            return $data;
+        }
+
+        return $this->getAnonymizationService()->anonymizeData($data, $this->anonymizeFields);
     }
 }

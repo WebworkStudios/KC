@@ -51,26 +51,6 @@ readonly class CursorPaginationResult
     }
 
     /**
-     * Prüft, ob es eine vorherige Seite gibt
-     *
-     * @return bool True, wenn es eine vorherige Seite gibt
-     */
-    public function hasPreviousPage(): bool
-    {
-        return $this->prevCursor !== null;
-    }
-
-    /**
-     * Prüft, ob es eine nächste Seite gibt
-     *
-     * @return bool True, wenn es eine nächste Seite gibt
-     */
-    public function hasNextPage(): bool
-    {
-        return $this->hasMore;
-    }
-
-    /**
      * Gibt die URL-Parameter für die nächste Seite zurück
      *
      * @return array|null URL-Parameter als assoziatives Array oder null, wenn es keine nächste Seite gibt
@@ -88,6 +68,16 @@ readonly class CursorPaginationResult
     }
 
     /**
+     * Prüft, ob es eine nächste Seite gibt
+     *
+     * @return bool True, wenn es eine nächste Seite gibt
+     */
+    public function hasNextPage(): bool
+    {
+        return $this->hasMore;
+    }
+
+    /**
      * Gibt die URL-Parameter für die vorherige Seite zurück
      *
      * @return array|null URL-Parameter als assoziatives Array oder null, wenn es keine vorherige Seite gibt
@@ -102,5 +92,15 @@ readonly class CursorPaginationResult
             'cursor' => $this->prevCursor,
             'per_page' => $this->perPage
         ];
+    }
+
+    /**
+     * Prüft, ob es eine vorherige Seite gibt
+     *
+     * @return bool True, wenn es eine vorherige Seite gibt
+     */
+    public function hasPreviousPage(): bool
+    {
+        return $this->prevCursor !== null;
     }
 }

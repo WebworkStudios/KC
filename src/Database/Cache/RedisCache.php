@@ -17,20 +17,16 @@ use Throwable;
  */
 class RedisCache implements CacheInterface
 {
-    /** @var Redis Redis-Instanz */
-    private Redis $redis;
-
-    /** @var bool Gibt an, ob der Verbindungsversuch bereits erfolgt ist */
-    private bool $connected = false;
-
-    /** @var string Präfix für alle Cache-Schlüssel */
-    private string $prefix;
-
-    /** @var LoggerInterface Logger für Cache-Operationen */
-    private LoggerInterface $logger;
-
     /** @var int Standard TTL in Sekunden, wenn keiner angegeben (1 Tag) */
     private const DEFAULT_TTL = 86400;
+    /** @var Redis Redis-Instanz */
+    private Redis $redis;
+    /** @var bool Gibt an, ob der Verbindungsversuch bereits erfolgt ist */
+    private bool $connected = false;
+    /** @var string Präfix für alle Cache-Schlüssel */
+    private string $prefix;
+    /** @var LoggerInterface Logger für Cache-Operationen */
+    private LoggerInterface $logger;
 
     /**
      * Erstellt eine neue RedisCache-Instanz
@@ -41,10 +37,11 @@ class RedisCache implements CacheInterface
      * @throws RuntimeException Wenn die Redis-Erweiterung nicht verfügbar ist
      */
     public function __construct(
-        ?Redis $redis = null,
-        string $prefix = 'db_cache:',
+        ?Redis           $redis = null,
+        string           $prefix = 'db_cache:',
         ?LoggerInterface $logger = null
-    ) {
+    )
+    {
         if (!extension_loaded('redis')) {
             throw new RuntimeException('Die Redis-Erweiterung ist nicht verfügbar');
         }
@@ -70,12 +67,13 @@ class RedisCache implements CacheInterface
      * @throws RuntimeException Wenn keine Verbindung hergestellt werden kann
      */
     public function connect(
-        string $host = '127.0.0.1',
-        int $port = 6379,
-        float $timeout = 0.0,
+        string  $host = '127.0.0.1',
+        int     $port = 6379,
+        float   $timeout = 0.0,
         ?string $password = null,
-        int $database = 0
-    ): bool {
+        int     $database = 0
+    ): bool
+    {
         try {
             $connectResult = $this->redis->connect($host, $port, $timeout);
 
@@ -127,12 +125,13 @@ class RedisCache implements CacheInterface
      * @throws RuntimeException Wenn keine Verbindung hergestellt werden kann
      */
     public function pconnect(
-        string $host = '127.0.0.1',
-        int $port = 6379,
-        float $timeout = 0.0,
+        string  $host = '127.0.0.1',
+        int     $port = 6379,
+        float   $timeout = 0.0,
         ?string $password = null,
-        int $database = 0
-    ): bool {
+        int     $database = 0
+    ): bool
+    {
         try {
             $connectResult = $this->redis->pconnect($host, $port, $timeout);
 
@@ -175,108 +174,6 @@ class RedisCache implements CacheInterface
     /**
      * {@inheritDoc}
      */
-    public function set(string $key, mixed $value, ?int $ttl = null, array $tags = []): bool
-    {
-        try {
-            $this->ensureConnected();
-
-            $prefixedKey = $this->prefixKey($key);
-            $serialized = $this->serialize($value);
-
-            // Pipeline für bessere Performance
-            $this->redis->multi();
-
-            // Hauptwert setzen
-            if ($ttl === null) {
-                $ttl = self::DEFAULT_TTL;
-            }
-
-            if ($ttl <= 0) {
-                $this->redis->set($prefixedKey, $serialized);
-            } else {
-                $this->redis->setex($prefixedKey, $ttl, $serialized);
-            }
-
-            // Tags verarbeiten
-            if (!empty($tags)) {
-                // Schlüssel zu jedem Tag hinzufügen
-                foreach ($tags as $tag) {
-                    $tagKey = $this->getTagKey($tag);
-                    $this->redis->sAdd($tagKey, $prefixedKey);
-
-                    // Sicherstellen, dass der Tag-Set nicht verfällt, wenn er verwendet wird
-                    $this->redis->persist($tagKey);
-                }
-
-                // Tags für Schlüssel speichern, um bei Löschung aufräumen zu können
-                $keyTagsKey = $this->getKeyTagsKey($prefixedKey);
-                $this->redis->sAdd($keyTagsKey, ...$tags);
-
-                // TTL für Key-Tags identisch zum Hauptschlüssel setzen
-                if ($ttl > 0) {
-                    $this->redis->expire($keyTagsKey, $ttl);
-                }
-            }
-
-            $results = $this->redis->exec();
-            $success = !in_array(false, $results, true);
-
-            $this->logger->debug("Redis Cache-Set ausgeführt", [
-                'key' => $key,
-                'ttl' => $ttl,
-                'tags' => $tags,
-                'success' => $success
-            ]);
-
-            return $success;
-        } catch (Throwable $e) {
-            $this->logger->error("Fehler beim Schreiben in den Redis-Cache: " . $e->getMessage(), [
-                'key' => $key,
-                'exception' => get_class($e)
-            ]);
-
-            return false;
-        }
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function get(string $key): mixed
-    {
-        try {
-            $this->ensureConnected();
-
-            $prefixedKey = $this->prefixKey($key);
-            $value = $this->redis->get($prefixedKey);
-
-            if ($value === false) {
-                $this->logger->debug("Cache-Miss für Schlüssel", [
-                    'key' => $key
-                ]);
-                return null;
-            }
-
-            $result = $this->unserialize($value);
-
-            $this->logger->debug("Cache-Hit für Schlüssel", [
-                'key' => $key
-            ]);
-
-            return $result;
-        } catch (Throwable $e) {
-            $this->logger->error("Fehler beim Lesen aus dem Redis-Cache: " . $e->getMessage(), [
-                'key' => $key,
-                'exception' => get_class($e)
-            ]);
-
-            return null;
-        }
-    }
-
-    /**
-     * {@inheritDoc}
-     */
     public function has(string $key): bool
     {
         try {
@@ -299,6 +196,35 @@ class RedisCache implements CacheInterface
 
             return false;
         }
+    }
+
+    /**
+     * Stellt sicher, dass eine Verbindung zum Redis-Server besteht
+     *
+     * @throws RuntimeException Wenn keine Verbindung hergestellt werden kann
+     */
+    private function ensureConnected(): void
+    {
+        if (!$this->connected) {
+            throw new RuntimeException('Keine Verbindung zum Redis-Server hergestellt. Rufen Sie connect() oder pconnect() auf.');
+        }
+
+        try {
+            $this->redis->ping();
+        } catch (RedisException $e) {
+            throw new RuntimeException('Redis-Verbindung wurde unterbrochen: ' . $e->getMessage(), 0, $e);
+        }
+    }
+
+    /**
+     * Fügt ein Präfix zum Cache-Schlüssel hinzu
+     *
+     * @param string $key Original-Schlüssel
+     * @return string Präfixierter Schlüssel
+     */
+    private function prefixKey(string $key): string
+    {
+        return $this->prefix . $key;
     }
 
     /**
@@ -349,6 +275,28 @@ class RedisCache implements CacheInterface
 
             return false;
         }
+    }
+
+    /**
+     * Erzeugt einen Schlüssel für die Tag-Zuordnungen eines Cache-Eintrags
+     *
+     * @param string $key Präfixierter Cache-Schlüssel
+     * @return string Schlüssel für die Tag-Zuordnungen
+     */
+    private function getKeyTagsKey(string $key): string
+    {
+        return $key . ':tags';
+    }
+
+    /**
+     * Erzeugt einen Schlüssel für ein Tag-Set
+     *
+     * @param string $tag Tag-Name
+     * @return string Redis-Schlüssel für das Tag-Set
+     */
+    private function getTagKey(string $tag): string
+    {
+        return $this->prefix . 'tag:' . $tag;
     }
 
     /**
@@ -497,53 +445,115 @@ class RedisCache implements CacheInterface
     }
 
     /**
-     * Fügt ein Präfix zum Cache-Schlüssel hinzu
-     *
-     * @param string $key Original-Schlüssel
-     * @return string Präfixierter Schlüssel
+     * {@inheritDoc}
      */
-    private function prefixKey(string $key): string
+    public function get(string $key): mixed
     {
-        return $this->prefix . $key;
-    }
-
-    /**
-     * Erzeugt einen Schlüssel für ein Tag-Set
-     *
-     * @param string $tag Tag-Name
-     * @return string Redis-Schlüssel für das Tag-Set
-     */
-    private function getTagKey(string $tag): string
-    {
-        return $this->prefix . 'tag:' . $tag;
-    }
-
-    /**
-     * Erzeugt einen Schlüssel für die Tag-Zuordnungen eines Cache-Eintrags
-     *
-     * @param string $key Präfixierter Cache-Schlüssel
-     * @return string Schlüssel für die Tag-Zuordnungen
-     */
-    private function getKeyTagsKey(string $key): string
-    {
-        return $key . ':tags';
-    }
-
-    /**
-     * Stellt sicher, dass eine Verbindung zum Redis-Server besteht
-     *
-     * @throws RuntimeException Wenn keine Verbindung hergestellt werden kann
-     */
-    private function ensureConnected(): void
-    {
-        if (!$this->connected) {
-            throw new RuntimeException('Keine Verbindung zum Redis-Server hergestellt. Rufen Sie connect() oder pconnect() auf.');
-        }
-
         try {
-            $this->redis->ping();
-        } catch (RedisException $e) {
-            throw new RuntimeException('Redis-Verbindung wurde unterbrochen: ' . $e->getMessage(), 0, $e);
+            $this->ensureConnected();
+
+            $prefixedKey = $this->prefixKey($key);
+            $value = $this->redis->get($prefixedKey);
+
+            if ($value === false) {
+                $this->logger->debug("Cache-Miss für Schlüssel", [
+                    'key' => $key
+                ]);
+                return null;
+            }
+
+            $result = $this->unserialize($value);
+
+            $this->logger->debug("Cache-Hit für Schlüssel", [
+                'key' => $key
+            ]);
+
+            return $result;
+        } catch (Throwable $e) {
+            $this->logger->error("Fehler beim Lesen aus dem Redis-Cache: " . $e->getMessage(), [
+                'key' => $key,
+                'exception' => get_class($e)
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Deserialisiert einen gespeicherten Wert
+     *
+     * @param string $value Serialisierter Wert
+     * @return mixed Deserialisierter Wert
+     */
+    private function unserialize(string $value): mixed
+    {
+        return unserialize($value);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function set(string $key, mixed $value, ?int $ttl = null, array $tags = []): bool
+    {
+        try {
+            $this->ensureConnected();
+
+            $prefixedKey = $this->prefixKey($key);
+            $serialized = $this->serialize($value);
+
+            // Pipeline für bessere Performance
+            $this->redis->multi();
+
+            // Hauptwert setzen
+            if ($ttl === null) {
+                $ttl = self::DEFAULT_TTL;
+            }
+
+            if ($ttl <= 0) {
+                $this->redis->set($prefixedKey, $serialized);
+            } else {
+                $this->redis->setex($prefixedKey, $ttl, $serialized);
+            }
+
+            // Tags verarbeiten
+            if (!empty($tags)) {
+                // Schlüssel zu jedem Tag hinzufügen
+                foreach ($tags as $tag) {
+                    $tagKey = $this->getTagKey($tag);
+                    $this->redis->sAdd($tagKey, $prefixedKey);
+
+                    // Sicherstellen, dass der Tag-Set nicht verfällt, wenn er verwendet wird
+                    $this->redis->persist($tagKey);
+                }
+
+                // Tags für Schlüssel speichern, um bei Löschung aufräumen zu können
+                $keyTagsKey = $this->getKeyTagsKey($prefixedKey);
+                $this->redis->sAdd($keyTagsKey, ...$tags);
+
+                // TTL für Key-Tags identisch zum Hauptschlüssel setzen
+                if ($ttl > 0) {
+                    $this->redis->expire($keyTagsKey, $ttl);
+                }
+            }
+
+            $results = $this->redis->exec();
+            $success = !in_array(false, $results, true);
+
+            $this->logger->debug("Redis Cache-Set ausgeführt", [
+                'key' => $key,
+                'ttl' => $ttl,
+                'tags' => $tags,
+                'success' => $success
+            ]);
+
+            return $success;
+        } catch (Throwable $e) {
+            $this->logger->error("Fehler beim Schreiben in den Redis-Cache: " . $e->getMessage(), [
+                'key' => $key,
+                'exception' => get_class($e)
+            ]);
+
+            return false;
         }
     }
 
@@ -556,17 +566,6 @@ class RedisCache implements CacheInterface
     private function serialize(mixed $value): string
     {
         return serialize($value);
-    }
-
-    /**
-     * Deserialisiert einen gespeicherten Wert
-     *
-     * @param string $value Serialisierter Wert
-     * @return mixed Deserialisierter Wert
-     */
-    private function unserialize(string $value): mixed
-    {
-        return unserialize($value);
     }
 
     /**

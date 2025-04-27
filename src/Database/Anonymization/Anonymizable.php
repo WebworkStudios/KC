@@ -19,8 +19,9 @@ class Anonymizable
      */
     public function __construct(
         public readonly string $strategy = 'name',
-        public readonly array $options = [],
-        public readonly bool $alwaysAnonymize = false
-    ) {
+        public readonly array  $options = [],
+        public readonly bool   $alwaysAnonymize = false
+    )
+    {
     }
 }

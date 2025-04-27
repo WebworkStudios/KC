@@ -36,7 +36,7 @@ trait PaginationTrait
         $data = $this->get();
 
         // Paginierungsinformationen berechnen
-        $lastPage = max(1, (int) ceil($total / $perPage));
+        $lastPage = max(1, (int)ceil($total / $perPage));
         $currentPage = min($page, $lastPage);
         $hasMorePages = $currentPage < $lastPage;
         $nextPage = $hasMorePages ? $currentPage + 1 : null;
@@ -74,11 +74,12 @@ trait PaginationTrait
      * @return CursorPaginationResult Cursor-Paginierungsergebnis
      */
     public function cursorPaginate(
-        string $column,
+        string          $column,
         string|int|null $cursor = null,
-        int $perPage = 15,
-        bool $descending = false
-    ): CursorPaginationResult {
+        int             $perPage = 15,
+        bool            $descending = false
+    ): CursorPaginationResult
+    {
         if ($perPage < 1) {
             throw new InvalidArgumentException("Elemente pro Seite muss positiv sein");
         }

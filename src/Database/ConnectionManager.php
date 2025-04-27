@@ -3,9 +3,8 @@
 
 namespace Src\Database;
 
-use InvalidArgumentException;
 use PDO;
-use RuntimeException;
+use PDOException;
 use Src\Database\Enums\ConnectionMode;
 use Src\Database\Enums\ConnectionStatus;
 use Src\Database\Exceptions\ConnectionException;
@@ -92,7 +91,7 @@ class ConnectionManager
             try {
                 $connection->query('SELECT 1');
                 return $connection;
-            } catch (\PDOException $e) {
+            } catch (PDOException $e) {
                 $this->logger->warning("Verbindung verloren, erstelle neue", [
                     'connection' => $name,
                     'server' => $serverKey
@@ -192,7 +191,7 @@ class ConnectionManager
             $this->connections[$name][$server->getName()] = $pdo;
 
             return $pdo;
-        } catch (\PDOException $e) {
+        } catch (PDOException $e) {
             $this->logger->error("Verbindungsfehler", [
                 'connection' => $name,
                 'server' => $server->getName(),
@@ -275,7 +274,7 @@ class ConnectionManager
                         // Verbindung testen
                         $this->connections[$name][$serverName]->query('SELECT 1');
                         $status[$name][$serverName] = ConnectionStatus::CONNECTED->value;
-                    } catch (\PDOException $e) {
+                    } catch (PDOException $e) {
                         $status[$name][$serverName] = ConnectionStatus::ERROR->value;
                     }
                 } else {

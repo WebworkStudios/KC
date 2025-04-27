@@ -6,6 +6,7 @@ use AllowDynamicProperties;
 use Closure;
 use InvalidArgumentException;
 use PDO;
+use PDOException;
 use PDOStatement;
 use Src\Database\Cache\CacheInterface;
 use Src\Database\Cache\NullCache;
@@ -15,10 +16,10 @@ use Src\Database\Enums\OrderDirection;
 use Src\Database\Enums\SqlOperator;
 use Src\Database\Exceptions\QueryException;
 use Src\Database\Traits\PaginationTrait;
-use Src\Database\Traits\TransactionTrait;
 use Src\Database\Traits\QueryBuilderAnonymizationTrait;
-use Src\Database\Anonymization\AnonymizationService;
+use Src\Database\Traits\TransactionTrait;
 use Src\Log\LoggerInterface;
+use Throwable;
 
 /**
  * Fluent Query Builder für MySQL mit Typsicherheit
@@ -83,10 +84,11 @@ use Src\Log\LoggerInterface;
      */
     public function __construct(
         private readonly ConnectionManager $connectionManager,
-        private readonly string $connectionName,
-        private readonly LoggerInterface $logger,
-        ?CacheInterface $cache = null
-    ) {
+        private readonly string            $connectionName,
+        private readonly LoggerInterface   $logger,
+        ?CacheInterface                    $cache = null
+    )
+    {
         $this->cache = $cache ?? new NullCache();
     }
 
@@ -182,6 +184,27 @@ use Src\Log\LoggerInterface;
     }
 
     /**
+     * Hilfsmethode für Aggregat-Funktionen
+     *
+     * @param string $function Name der Funktion (MAX, MIN, AVG, SUM, COUNT)
+     * @param string $column Spaltenname
+     * @param string|null $alias Alias für das Ergebnis
+     * @return void
+     */
+    private function aggregate(string $function, string $column, ?string $alias = null): void
+    {
+        $this->columns = [];
+
+        $columnExpression = "{$function}({$column})";
+
+        if ($alias !== null) {
+            $columnExpression .= " AS {$alias}";
+        }
+
+        $this->columns[] = $columnExpression;
+    }
+
+    /**
      * Setzt eine MIN-Funktion
      *
      * @param string $column Spaltenname
@@ -218,27 +241,6 @@ use Src\Log\LoggerInterface;
     {
         $this->aggregate('SUM', $column, $alias);
         return $this;
-    }
-
-    /**
-     * Hilfsmethode für Aggregat-Funktionen
-     *
-     * @param string $function Name der Funktion (MAX, MIN, AVG, SUM, COUNT)
-     * @param string $column Spaltenname
-     * @param string|null $alias Alias für das Ergebnis
-     * @return void
-     */
-    private function aggregate(string $function, string $column, ?string $alias = null): void
-    {
-        $this->columns = [];
-
-        $columnExpression = "{$function}({$column})";
-
-        if ($alias !== null) {
-            $columnExpression .= " AS {$alias}";
-        }
-
-        $this->columns[] = $columnExpression;
     }
 
     /**
@@ -520,34 +522,6 @@ use Src\Log\LoggerInterface;
     }
 
     /**
-     * Fügt eine JOIN-Klausel hinzu
-     *
-     * @param string $table Tabellenname für den Join
-     * @param string $first Erste Join-Bedingung (Spalte der aktuellen Tabelle)
-     * @param string $operator Join-Operator (=, <, >, etc.)
-     * @param string $second Zweite Join-Bedingung (Spalte der Join-Tabelle)
-     * @param JoinType $type Join-Typ (INNER, LEFT, RIGHT, etc.)
-     * @return self
-     */
-    public function join(
-        string $table,
-        string $first,
-        string $operator,
-        string $second,
-        JoinType $type = JoinType::INNER
-    ): self {
-        $this->joins[] = [
-            'table' => $table,
-            'first' => $first,
-            'operator' => $operator,
-            'second' => $second,
-            'type' => $type->value,
-        ];
-
-        return $this;
-    }
-
-    /**
      * Fügt eine INNER JOIN-Klausel hinzu
      *
      * @param string $table Tabellenname für den Join
@@ -559,6 +533,35 @@ use Src\Log\LoggerInterface;
     public function innerJoin(string $table, string $first, string $operator, string $second): self
     {
         return $this->join($table, $first, $operator, $second, JoinType::INNER);
+    }
+
+    /**
+     * Fügt eine JOIN-Klausel hinzu
+     *
+     * @param string $table Tabellenname für den Join
+     * @param string $first Erste Join-Bedingung (Spalte der aktuellen Tabelle)
+     * @param string $operator Join-Operator (=, <, >, etc.)
+     * @param string $second Zweite Join-Bedingung (Spalte der Join-Tabelle)
+     * @param JoinType $type Join-Typ (INNER, LEFT, RIGHT, etc.)
+     * @return self
+     */
+    public function join(
+        string   $table,
+        string   $first,
+        string   $operator,
+        string   $second,
+        JoinType $type = JoinType::INNER
+    ): self
+    {
+        $this->joins[] = [
+            'table' => $table,
+            'first' => $first,
+            'operator' => $operator,
+            'second' => $second,
+            'type' => $type->value,
+        ];
+
+        return $this;
     }
 
     /**
@@ -632,6 +635,17 @@ use Src\Log\LoggerInterface;
     }
 
     /**
+     * Fügt eine ORDER BY DESC-Klausel hinzu
+     *
+     * @param string $column Spaltenname
+     * @return self
+     */
+    public function orderByDesc(string $column): self
+    {
+        return $this->orderBy($column, OrderDirection::DESC);
+    }
+
+    /**
      * Fügt eine ORDER BY-Klausel hinzu
      *
      * @param string $column Spaltenname
@@ -646,17 +660,6 @@ use Src\Log\LoggerInterface;
         ];
 
         return $this;
-    }
-
-    /**
-     * Fügt eine ORDER BY DESC-Klausel hinzu
-     *
-     * @param string $column Spaltenname
-     * @return self
-     */
-    public function orderByDesc(string $column): self
-    {
-        return $this->orderBy($column, OrderDirection::DESC);
     }
 
     /**
@@ -699,21 +702,49 @@ use Src\Log\LoggerInterface;
     }
 
     /**
-     * Generiert einen eindeutigen Cache-Key für die aktuelle Abfrage
+     * Führt eine SELECT-Abfrage aus und gibt eine einzelne Zelle zurück
      *
-     * @return string Cache-Key
+     * @param string|null $column Optionaler Spaltenname (verwendet die erste Spalte, wenn nicht angegeben)
+     * @return mixed Wert der Zelle oder null, wenn keine Ergebnisse gefunden wurden
+     * @throws QueryException Bei Fehlern in der Abfrage
      */
-    private function generateCacheKey(): string
+    public function value(?string $column = null): mixed
     {
-        if ($this->cacheKey !== null) {
-            return 'query_' . $this->connectionName . '_' . $this->cacheKey;
+        // Wenn eine Spalte angegeben wurde, nur diese auswählen
+        if ($column !== null) {
+            $this->columns = [$column];
         }
 
-        // Hash aus der SQL-Abfrage und Parametern erstellen
-        $sql = $this->toSql();
-        $params = $this->getBindings();
+        $result = $this->first();
 
-        return 'query_' . $this->connectionName . '_' . md5($sql . serialize($params));
+        if ($result === null) {
+            return null;
+        }
+
+        // Spaltenname ermitteln (erste Spalte, wenn nicht explizit angegeben)
+        if ($column === null) {
+            $column = array_key_first($result);
+        }
+
+        return $result[$column] ?? null;
+    }
+
+    /**
+     * Führt eine SELECT-Abfrage aus und gibt die erste Ergebniszeile zurück
+     *
+     * @return array<string, mixed>|null Ergebniszeile oder null, wenn keine Ergebnisse gefunden wurden
+     * @throws QueryException Bei Fehlern in der Abfrage
+     */
+    public function first(): ?array
+    {
+        // Limit auf 1 setzen, um nur die erste Zeile abzurufen
+        $this->limit = 1;
+
+        $results = $this->get();
+        $result = $results[0] ?? null;
+
+        // Hier keine explizite Anonymisierung nötig, da get() bereits die Anonymisierung anwendet
+        return $result;
     }
 
     /**
@@ -765,7 +796,7 @@ use Src\Log\LoggerInterface;
 
             // Anonymisierung anwenden, falls aktiviert
             return $this->anonymizationEnabled ? $this->anonymizeResults($result) : $result;
-        } catch (\PDOException $e) {
+        } catch (PDOException $e) {
             $this->logger->error("Fehler bei SELECT-Abfrage", [
                 'connection' => $this->connectionName,
                 'query' => $query,
@@ -777,504 +808,21 @@ use Src\Log\LoggerInterface;
     }
 
     /**
-     * Führt eine SELECT-Abfrage aus und gibt die erste Ergebniszeile zurück
+     * Generiert einen eindeutigen Cache-Key für die aktuelle Abfrage
      *
-     * @return array<string, mixed>|null Ergebniszeile oder null, wenn keine Ergebnisse gefunden wurden
-     * @throws QueryException Bei Fehlern in der Abfrage
+     * @return string Cache-Key
      */
-    public function first(): ?array
+    private function generateCacheKey(): string
     {
-        // Limit auf 1 setzen, um nur die erste Zeile abzurufen
-        $this->limit = 1;
-
-        $results = $this->get();
-        $result = $results[0] ?? null;
-
-        // Hier keine explizite Anonymisierung nötig, da get() bereits die Anonymisierung anwendet
-        return $result;
-    }
-
-    /**
-     * Führt eine SELECT-Abfrage aus und gibt eine einzelne Zelle zurück
-     *
-     * @param string|null $column Optionaler Spaltenname (verwendet die erste Spalte, wenn nicht angegeben)
-     * @return mixed Wert der Zelle oder null, wenn keine Ergebnisse gefunden wurden
-     * @throws QueryException Bei Fehlern in der Abfrage
-     */
-    public function value(?string $column = null): mixed
-    {
-        // Wenn eine Spalte angegeben wurde, nur diese auswählen
-        if ($column !== null) {
-            $this->columns = [$column];
+        if ($this->cacheKey !== null) {
+            return 'query_' . $this->connectionName . '_' . $this->cacheKey;
         }
 
-        $result = $this->first();
-
-        if ($result === null) {
-            return null;
-        }
-
-        // Spaltenname ermitteln (erste Spalte, wenn nicht explizit angegeben)
-        if ($column === null) {
-            $column = array_key_first($result);
-        }
-
-        return $result[$column] ?? null;
-    }
-
-    /**
-     * Führt eine SELECT-Abfrage aus und gibt eine einzelne Spalte zurück
-     *
-     * @param string|null $column Optionaler Spaltenname (verwendet die erste Spalte, wenn nicht angegeben)
-     * @return array<mixed> Array mit den Werten der Spalte
-     * @throws QueryException Bei Fehlern in der Abfrage
-     */
-    public function pluck(?string $column = null): array
-    {
-        // Wenn eine Spalte angegeben wurde, nur diese auswählen
-        if ($column !== null) {
-            $this->columns = [$column];
-        }
-
-        $results = $this->get();
-        $values = [];
-
-        if (empty($results)) {
-            return $values;
-        }
-
-        // Spaltenname ermitteln (erste Spalte, wenn nicht explizit angegeben)
-        if ($column === null) {
-            $column = array_key_first($results[0]);
-        }
-
-        foreach ($results as $row) {
-            $values[] = $row[$column] ?? null;
-        }
-
-        return $values;
-    }
-
-    /**
-     * Führt eine SELECT-Abfrage aus und gibt Werte einer Spalte als Schlüssel und einer anderen Spalte als Werte zurück
-     *
-     * @param string $value Spaltenname für die Werte
-     * @param string $key Spaltenname für die Schlüssel
-     * @return array<mixed, mixed> Assoziatives Array mit Schlüssel-Wert-Paaren
-     * @throws QueryException Bei Fehlern in der Abfrage
-     */
-    public function pluckWithKeys(string $value, string $key): array
-    {
-        // Beide Spalten auswählen
-        $this->columns = [$key, $value];
-
-        $results = $this->get();
-        $values = [];
-
-        foreach ($results as $row) {
-            $keyValue = $row[$key] ?? null;
-            $valueValue = $row[$value] ?? null;
-
-            if ($keyValue !== null) {
-                $values[$keyValue] = $valueValue;
-            }
-        }
-
-        return $values;
-    }
-
-    /**
-     * Führt eine Zählung der Ergebnisse durch
-     *
-     * @param string $column Spalte für die Zählung (Standard: '*')
-     * @return int Anzahl der Ergebnisse
-     * @throws QueryException Bei Fehlern in der Abfrage
-     */
-    public function count(string $column = '*'): int
-    {
-        $original = $this->columns;
-
-        $this->columns = ["COUNT({$column}) as aggregate"];
-
-        $result = $this->first();
-
-        $this->columns = $original;
-
-        return (int) ($result['aggregate'] ?? 0);
-    }
-
-    /**
-     * Prüft, ob die Abfrage Ergebnisse liefert
-     *
-     * @return bool True, wenn Ergebnisse vorhanden sind, sonst False
-     * @throws QueryException Bei Fehlern in der Abfrage
-     */
-    public function exists(): bool
-    {
-        return $this->count() > 0;
-    }
-
-    /**
-     * Fügt einen neuen Datensatz ein
-     *
-     * @param array<string, mixed> $values Zu speichernde Werte als Schlüssel-Wert-Paare
-     * @return int|string ID des eingefügten Datensatzes (bei Auto-Increment) oder Anzahl der eingefügten Zeilen
-     * @throws QueryException Bei Fehlern in der Abfrage
-     */
-    public function insert(array $values): int|string
-    {
-        $query = $this->compileInsert($values);
-        $bindings = $this->prepareBindings($values);
-
-        try {
-            $stmt = $this->executeQuery($query, $bindings, ConnectionMode::WRITE);
-
-            $connection = $this->connectionManager->getConnection($this->connectionName, true);
-            $insertId = $connection->lastInsertId();
-
-            // Cache invalidieren, wenn Caching aktiviert ist
-            $this->invalidateTableCache();
-
-            return $insertId ?: $stmt->rowCount();
-        } catch (\PDOException $e) {
-            $this->logger->error("Fehler bei INSERT-Abfrage", [
-                'connection' => $this->connectionName,
-                'query' => $query,
-                'error' => $e->getMessage()
-            ]);
-
-            throw new QueryException("Fehler bei INSERT-Abfrage: {$e->getMessage()}", $e->getCode(), $e);
-        }
-    }
-
-    /**
-     * Fügt mehrere Datensätze auf einmal ein
-     *
-     * @param array<array<string, mixed>> $values Array mit Arrays von Werten
-     * @return int Anzahl der eingefügten Zeilen
-     * @throws QueryException Bei Fehlern in der Abfrage
-     */
-    public function insertMany(array $values): int
-    {
-        if (empty($values)) {
-            return 0;
-        }
-
-        // Spaltennamen aus dem ersten Eintrag extrahieren
-        $columns = array_keys($values[0]);
-
-        $query = $this->compileInsertMany($columns, count($values));
-        $bindings = [];
-
-        // Werte für alle Einträge flach in ein Binding-Array packen
-        foreach ($values as $row) {
-            foreach ($columns as $column) {
-                $bindings[] = $row[$column] ?? null;
-            }
-        }
-
-        try {
-            $stmt = $this->executeQuery($query, $bindings, ConnectionMode::WRITE);
-
-            // Cache invalidieren
-            $this->invalidateTableCache();
-
-            return $stmt->rowCount();
-        } catch (\PDOException $e) {
-            $this->logger->error("Fehler bei INSERT MANY-Abfrage", [
-                'connection' => $this->connectionName,
-                'query' => $query,
-                'error' => $e->getMessage()
-            ]);
-
-            throw new QueryException("Fehler bei INSERT MANY-Abfrage: {$e->getMessage()}", $e->getCode(), $e);
-        }
-    }
-
-    /**
-     * Aktualisiert vorhandene Datensätze
-     *
-     * @param array<string, mixed> $values Zu aktualisierende Werte als Schlüssel-Wert-Paare
-     * @return int Anzahl der aktualisierten Zeilen
-     * @throws QueryException Bei Fehlern in der Abfrage
-     */
-    public function update(array $values): int
-    {
-        $query = $this->compileUpdate($values);
-        $bindings = array_merge($this->prepareBindings($values), $this->getBindings());
-
-        try {
-            $stmt = $this->executeQuery($query, $bindings, ConnectionMode::WRITE);
-
-            // Cache invalidieren
-            $this->invalidateTableCache();
-
-            return $stmt->rowCount();
-        } catch (\PDOException $e) {
-            $this->logger->error("Fehler bei UPDATE-Abfrage", [
-                'connection' => $this->connectionName,
-                'query' => $query,
-                'error' => $e->getMessage()
-            ]);
-
-            throw new QueryException("Fehler bei UPDATE-Abfrage: {$e->getMessage()}", $e->getCode(), $e);
-        }
-    }
-
-    /**
-     * Inkrementiert einen Wert in einer Spalte
-     *
-     * @param string $column Spaltenname
-     * @param int $amount Inkrementierungswert (Standard: 1)
-     * @return int Anzahl der aktualisierten Zeilen
-     * @throws QueryException Bei Fehlern in der Abfrage
-     */
-    public function increment(string $column, int $amount = 1): int
-    {
-        return $this->updateRaw("`{$column}` = `{$column}` + ?", [$amount]);
-    }
-
-    /**
-     * Dekrementiert einen Wert in einer Spalte
-     *
-     * @param string $column Spaltenname
-     * @param int $amount Dekrementierungswert (Standard: 1)
-     * @return int Anzahl der aktualisierten Zeilen
-     * @throws QueryException Bei Fehlern in der Abfrage
-     */
-    public function decrement(string $column, int $amount = 1): int
-    {
-        return $this->updateRaw("`{$column}` = `{$column}` - ?", [$amount]);
-    }
-
-    /**
-     * Führt eine Raw-Update-Abfrage aus
-     *
-     * @param string $expression SQL-Ausdruck für SET
-     * @param array $bindings Parameter-Bindings für den Ausdruck
-     * @return int Anzahl der aktualisierten Zeilen
-     * @throws QueryException Bei Fehlern in der Abfrage
-     */
-    public function updateRaw(string $expression, array $bindings = []): int
-    {
-        $query = $this->compileUpdateRaw($expression);
-        $mergedBindings = array_merge($bindings, $this->getBindings());
-
-        try {
-            $stmt = $this->executeQuery($query, $mergedBindings, ConnectionMode::WRITE);
-
-            // Cache invalidieren
-            $this->invalidateTableCache();
-
-            return $stmt->rowCount();
-        } catch (\PDOException $e) {
-            $this->logger->error("Fehler bei UPDATE RAW-Abfrage", [
-                'connection' => $this->connectionName,
-                'query' => $query,
-                'error' => $e->getMessage()
-            ]);
-
-            throw new QueryException("Fehler bei UPDATE RAW-Abfrage: {$e->getMessage()}", $e->getCode(), $e);
-        }
-    }
-
-    /**
-     * Löscht Datensätze
-     *
-     * @return int Anzahl der gelöschten Zeilen
-     * @throws QueryException Bei Fehlern in der Abfrage
-     */
-    public function delete(): int
-    {
-        $query = $this->compileDelete();
-        $bindings = $this->getBindings();
-
-        try {
-            $stmt = $this->executeQuery($query, $bindings, ConnectionMode::WRITE);
-
-            // Cache invalidieren
-            $this->invalidateTableCache();
-
-            return $stmt->rowCount();
-        } catch (\PDOException $e) {
-            $this->logger->error("Fehler bei DELETE-Abfrage", [
-                'connection' => $this->connectionName,
-                'query' => $query,
-                'error' => $e->getMessage()
-            ]);
-
-            throw new QueryException("Fehler bei DELETE-Abfrage: {$e->getMessage()}", $e->getCode(), $e);
-        }
-    }
-
-    /**
-     * Führt eine TRUNCATE-Abfrage aus (löscht alle Datensätze und setzt Auto-Increment zurück)
-     *
-     * @return bool True bei Erfolg
-     * @throws QueryException Bei Fehlern in der Abfrage
-     */
-    public function truncate(): bool
-    {
-        $query = "TRUNCATE TABLE {$this->table}";
-
-        try {
-            $this->executeQuery($query, [], ConnectionMode::WRITE);
-
-            // Cache invalidieren
-            $this->invalidateTableCache();
-
-            return true;
-        } catch (\PDOException $e) {
-            $this->logger->error("Fehler bei TRUNCATE-Abfrage", [
-                'connection' => $this->connectionName,
-                'query' => $query,
-                'error' => $e->getMessage()
-            ]);
-
-            throw new QueryException("Fehler bei TRUNCATE-Abfrage: {$e->getMessage()}", $e->getCode(), $e);
-        }
-    }
-
-    /**
-     * Erzeugt ein Future-Objekt für asynchrone Abfragen
-     *
-     * @return Future Asynchrones Future-Objekt
-     */
-    public function async(): Future
-    {
-        return new Future($this);
-    }
-
-    /**
-     * Führt eine SQL-Abfrage aus
-     *
-     * @param string $query SQL-Abfrage
-     * @param array $bindings Parameter-Bindings
-     * @param ConnectionMode $mode Verbindungsmodus (READ oder WRITE)
-     * @return PDOStatement
-     * @throws \PDOException Bei Fehlern in der Abfrage
-     */
-    private function executeQuery(string $query, array $bindings, ConnectionMode $mode): PDOStatement
-    {
-        $this->logger->debug("Führe SQL-Abfrage aus", [
-            'connection' => $this->connectionName,
-            'mode' => $mode->name,
-            'query' => $query
-        ]);
-
-        $connection = $this->connectionManager->getConnection(
-            $this->connectionName,
-            $mode === ConnectionMode::WRITE
-        );
-
-        $statement = $connection->prepare($query);
-
-        // Parameter binden
-        foreach ($bindings as $key => $value) {
-            $paramType = $this->getParamType($value);
-
-            if (is_int($key)) {
-                // Positionsparameter (?), 1-basierter Index
-                $statement->bindValue($key + 1, $value, $paramType);
-            } else {
-                // Benannter Parameter (:name)
-                $statement->bindValue($key, $value, $paramType);
-            }
-        }
-
-        $statement->execute();
-
-        return $statement;
-    }
-
-    /**
-     * Ermittelt den PDO-Parametertyp für einen Wert
-     *
-     * @param mixed $value Zu bindender Wert
-     * @return int PDO-Parametertyp
-     */
-    private function getParamType(mixed $value): int
-    {
-        return match (true) {
-            is_int($value) => PDO::PARAM_INT,
-            is_bool($value) => PDO::PARAM_BOOL,
-            is_null($value) => PDO::PARAM_NULL,
-            default => PDO::PARAM_STR,
-        };
-    }
-
-    /**
-     * Bereitet Bindings für eine Abfrage vor
-     *
-     * @param array $values Zu bindende Werte
-     * @return array Vorbereitete Bindings
-     */
-    private function prepareBindings(array $values): array
-    {
-        $bindings = [];
-
-        foreach ($values as $key => $value) {
-            $bindings[":$key"] = $value;
-        }
-
-        return $bindings;
-    }
-
-    /**
-     * Gibt die aktuellen WHERE-Bindings zurück
-     *
-     * @return array Bindings für WHERE-Klauseln
-     */
-    private function getBindings(): array
-    {
-        $bindings = [];
-
-        // Where-Bedingungen
-        foreach ($this->wheres as $where) {
-            switch ($where['type']) {
-                case 'basic':
-                case 'or':
-                    // Operator, der keinen Wert benötigt
-                    if (in_array($where['operator'], [SqlOperator::IS_NULL->value, SqlOperator::IS_NOT_NULL->value])) {
-                        break;
-                    }
-                    $bindings[] = $where['value'];
-                    break;
-
-                case 'in':
-                case 'notIn':
-                    $bindings = array_merge($bindings, $where['values']);
-                    break;
-
-                case 'between':
-                case 'notBetween':
-                    $bindings[] = $where['min'];
-                    $bindings[] = $where['max'];
-                    break;
-
-                case 'nested':
-                case 'orNested':
-                    // Alle Bindings der verschachtelten Abfrage hinzufügen
-                    /** @var QueryBuilder $query */
-                    $query = $where['query'];
-                    $bindings = array_merge($bindings, $query->getBindings());
-                    break;
-
-                case 'raw':
-                    // Bindings für Raw-SQL hinzufügen
-                    $bindings = array_merge($bindings, $where['bindings']);
-                    break;
-            }
-        }
-
-        // Having-Bedingungen
-        foreach ($this->havings as $having) {
-            if ($having['type'] === 'basic' && $having['value'] !== null) {
-                $bindings[] = $having['value'];
-            }
-        }
-
-        return $bindings;
+        // Hash aus der SQL-Abfrage und Parametern erstellen
+        $sql = $this->toSql();
+        $params = $this->getBindings();
+
+        return 'query_' . $this->connectionName . '_' . md5($sql . serialize($params));
     }
 
     /**
@@ -1489,6 +1037,246 @@ use Src\Log\LoggerInterface;
     }
 
     /**
+     * Gibt die aktuellen WHERE-Bindings zurück
+     *
+     * @return array Bindings für WHERE-Klauseln
+     */
+    private function getBindings(): array
+    {
+        $bindings = [];
+
+        // Where-Bedingungen
+        foreach ($this->wheres as $where) {
+            switch ($where['type']) {
+                case 'basic':
+                case 'or':
+                    // Operator, der keinen Wert benötigt
+                    if (in_array($where['operator'], [SqlOperator::IS_NULL->value, SqlOperator::IS_NOT_NULL->value])) {
+                        break;
+                    }
+                    $bindings[] = $where['value'];
+                    break;
+
+                case 'in':
+                case 'notIn':
+                    $bindings = array_merge($bindings, $where['values']);
+                    break;
+
+                case 'between':
+                case 'notBetween':
+                    $bindings[] = $where['min'];
+                    $bindings[] = $where['max'];
+                    break;
+
+                case 'nested':
+                case 'orNested':
+                    // Alle Bindings der verschachtelten Abfrage hinzufügen
+                    /** @var QueryBuilder $query */
+                    $query = $where['query'];
+                    $bindings = array_merge($bindings, $query->getBindings());
+                    break;
+
+                case 'raw':
+                    // Bindings für Raw-SQL hinzufügen
+                    $bindings = array_merge($bindings, $where['bindings']);
+                    break;
+            }
+        }
+
+        // Having-Bedingungen
+        foreach ($this->havings as $having) {
+            if ($having['type'] === 'basic' && $having['value'] !== null) {
+                $bindings[] = $having['value'];
+            }
+        }
+
+        return $bindings;
+    }
+
+    /**
+     * Führt eine SQL-Abfrage aus
+     *
+     * @param string $query SQL-Abfrage
+     * @param array $bindings Parameter-Bindings
+     * @param ConnectionMode $mode Verbindungsmodus (READ oder WRITE)
+     * @return PDOStatement
+     * @throws PDOException Bei Fehlern in der Abfrage
+     */
+    private function executeQuery(string $query, array $bindings, ConnectionMode $mode): PDOStatement
+    {
+        $this->logger->debug("Führe SQL-Abfrage aus", [
+            'connection' => $this->connectionName,
+            'mode' => $mode->name,
+            'query' => $query
+        ]);
+
+        $connection = $this->connectionManager->getConnection(
+            $this->connectionName,
+            $mode === ConnectionMode::WRITE
+        );
+
+        $statement = $connection->prepare($query);
+
+        // Parameter binden
+        foreach ($bindings as $key => $value) {
+            $paramType = $this->getParamType($value);
+
+            if (is_int($key)) {
+                // Positionsparameter (?), 1-basierter Index
+                $statement->bindValue($key + 1, $value, $paramType);
+            } else {
+                // Benannter Parameter (:name)
+                $statement->bindValue($key, $value, $paramType);
+            }
+        }
+
+        $statement->execute();
+
+        return $statement;
+    }
+
+    /**
+     * Ermittelt den PDO-Parametertyp für einen Wert
+     *
+     * @param mixed $value Zu bindender Wert
+     * @return int PDO-Parametertyp
+     */
+    private function getParamType(mixed $value): int
+    {
+        return match (true) {
+            is_int($value) => PDO::PARAM_INT,
+            is_bool($value) => PDO::PARAM_BOOL,
+            is_null($value) => PDO::PARAM_NULL,
+            default => PDO::PARAM_STR,
+        };
+    }
+
+    /**
+     * Führt eine SELECT-Abfrage aus und gibt eine einzelne Spalte zurück
+     *
+     * @param string|null $column Optionaler Spaltenname (verwendet die erste Spalte, wenn nicht angegeben)
+     * @return array<mixed> Array mit den Werten der Spalte
+     * @throws QueryException Bei Fehlern in der Abfrage
+     */
+    public function pluck(?string $column = null): array
+    {
+        // Wenn eine Spalte angegeben wurde, nur diese auswählen
+        if ($column !== null) {
+            $this->columns = [$column];
+        }
+
+        $results = $this->get();
+        $values = [];
+
+        if (empty($results)) {
+            return $values;
+        }
+
+        // Spaltenname ermitteln (erste Spalte, wenn nicht explizit angegeben)
+        if ($column === null) {
+            $column = array_key_first($results[0]);
+        }
+
+        foreach ($results as $row) {
+            $values[] = $row[$column] ?? null;
+        }
+
+        return $values;
+    }
+
+    /**
+     * Führt eine SELECT-Abfrage aus und gibt Werte einer Spalte als Schlüssel und einer anderen Spalte als Werte zurück
+     *
+     * @param string $value Spaltenname für die Werte
+     * @param string $key Spaltenname für die Schlüssel
+     * @return array<mixed, mixed> Assoziatives Array mit Schlüssel-Wert-Paaren
+     * @throws QueryException Bei Fehlern in der Abfrage
+     */
+    public function pluckWithKeys(string $value, string $key): array
+    {
+        // Beide Spalten auswählen
+        $this->columns = [$key, $value];
+
+        $results = $this->get();
+        $values = [];
+
+        foreach ($results as $row) {
+            $keyValue = $row[$key] ?? null;
+            $valueValue = $row[$value] ?? null;
+
+            if ($keyValue !== null) {
+                $values[$keyValue] = $valueValue;
+            }
+        }
+
+        return $values;
+    }
+
+    /**
+     * Prüft, ob die Abfrage Ergebnisse liefert
+     *
+     * @return bool True, wenn Ergebnisse vorhanden sind, sonst False
+     * @throws QueryException Bei Fehlern in der Abfrage
+     */
+    public function exists(): bool
+    {
+        return $this->count() > 0;
+    }
+
+    /**
+     * Führt eine Zählung der Ergebnisse durch
+     *
+     * @param string $column Spalte für die Zählung (Standard: '*')
+     * @return int Anzahl der Ergebnisse
+     * @throws QueryException Bei Fehlern in der Abfrage
+     */
+    public function count(string $column = '*'): int
+    {
+        $original = $this->columns;
+
+        $this->columns = ["COUNT({$column}) as aggregate"];
+
+        $result = $this->first();
+
+        $this->columns = $original;
+
+        return (int)($result['aggregate'] ?? 0);
+    }
+
+    /**
+     * Fügt einen neuen Datensatz ein
+     *
+     * @param array<string, mixed> $values Zu speichernde Werte als Schlüssel-Wert-Paare
+     * @return int|string ID des eingefügten Datensatzes (bei Auto-Increment) oder Anzahl der eingefügten Zeilen
+     * @throws QueryException Bei Fehlern in der Abfrage
+     */
+    public function insert(array $values): int|string
+    {
+        $query = $this->compileInsert($values);
+        $bindings = $this->prepareBindings($values);
+
+        try {
+            $stmt = $this->executeQuery($query, $bindings, ConnectionMode::WRITE);
+
+            $connection = $this->connectionManager->getConnection($this->connectionName, true);
+            $insertId = $connection->lastInsertId();
+
+            // Cache invalidieren, wenn Caching aktiviert ist
+            $this->invalidateTableCache();
+
+            return $insertId ?: $stmt->rowCount();
+        } catch (PDOException $e) {
+            $this->logger->error("Fehler bei INSERT-Abfrage", [
+                'connection' => $this->connectionName,
+                'query' => $query,
+                'error' => $e->getMessage()
+            ]);
+
+            throw new QueryException("Fehler bei INSERT-Abfrage: {$e->getMessage()}", $e->getCode(), $e);
+        }
+    }
+
+    /**
      * Kompiliert eine INSERT-Abfrage
      *
      * @param array $values Einzufügende Werte
@@ -1500,6 +1288,86 @@ use Src\Log\LoggerInterface;
         $parameters = implode(', ', array_map(fn($col) => ":{$col}", array_keys($values)));
 
         return "INSERT INTO {$this->table} ({$columns}) VALUES ({$parameters})";
+    }
+
+    /**
+     * Bereitet Bindings für eine Abfrage vor
+     *
+     * @param array $values Zu bindende Werte
+     * @return array Vorbereitete Bindings
+     */
+    private function prepareBindings(array $values): array
+    {
+        $bindings = [];
+
+        foreach ($values as $key => $value) {
+            $bindings[":$key"] = $value;
+        }
+
+        return $bindings;
+    }
+
+    /**
+     * Invalidiert alle Cache-Einträge für die aktuelle Tabelle
+     *
+     * @return void
+     */
+    private function invalidateTableCache(): void
+    {
+        if ($this->cache instanceof NullCache) {
+            return;
+        }
+
+        $this->logger->debug("Invalidiere Cache für Tabelle", [
+            'connection' => $this->connectionName,
+            'table' => $this->table
+        ]);
+
+        $this->cache->invalidateByTag("table:{$this->connectionName}:{$this->table}");
+    }
+
+    /**
+     * Fügt mehrere Datensätze auf einmal ein
+     *
+     * @param array<array<string, mixed>> $values Array mit Arrays von Werten
+     * @return int Anzahl der eingefügten Zeilen
+     * @throws QueryException Bei Fehlern in der Abfrage
+     */
+    public function insertMany(array $values): int
+    {
+        if (empty($values)) {
+            return 0;
+        }
+
+        // Spaltennamen aus dem ersten Eintrag extrahieren
+        $columns = array_keys($values[0]);
+
+        $query = $this->compileInsertMany($columns, count($values));
+        $bindings = [];
+
+        // Werte für alle Einträge flach in ein Binding-Array packen
+        foreach ($values as $row) {
+            foreach ($columns as $column) {
+                $bindings[] = $row[$column] ?? null;
+            }
+        }
+
+        try {
+            $stmt = $this->executeQuery($query, $bindings, ConnectionMode::WRITE);
+
+            // Cache invalidieren
+            $this->invalidateTableCache();
+
+            return $stmt->rowCount();
+        } catch (PDOException $e) {
+            $this->logger->error("Fehler bei INSERT MANY-Abfrage", [
+                'connection' => $this->connectionName,
+                'query' => $query,
+                'error' => $e->getMessage()
+            ]);
+
+            throw new QueryException("Fehler bei INSERT MANY-Abfrage: {$e->getMessage()}", $e->getCode(), $e);
+        }
     }
 
     /**
@@ -1533,6 +1401,36 @@ use Src\Log\LoggerInterface;
     }
 
     /**
+     * Aktualisiert vorhandene Datensätze
+     *
+     * @param array<string, mixed> $values Zu aktualisierende Werte als Schlüssel-Wert-Paare
+     * @return int Anzahl der aktualisierten Zeilen
+     * @throws QueryException Bei Fehlern in der Abfrage
+     */
+    public function update(array $values): int
+    {
+        $query = $this->compileUpdate($values);
+        $bindings = array_merge($this->prepareBindings($values), $this->getBindings());
+
+        try {
+            $stmt = $this->executeQuery($query, $bindings, ConnectionMode::WRITE);
+
+            // Cache invalidieren
+            $this->invalidateTableCache();
+
+            return $stmt->rowCount();
+        } catch (PDOException $e) {
+            $this->logger->error("Fehler bei UPDATE-Abfrage", [
+                'connection' => $this->connectionName,
+                'query' => $query,
+                'error' => $e->getMessage()
+            ]);
+
+            throw new QueryException("Fehler bei UPDATE-Abfrage: {$e->getMessage()}", $e->getCode(), $e);
+        }
+    }
+
+    /**
      * Kompiliert eine UPDATE-Abfrage
      *
      * @param array $values Zu aktualisierende Werte
@@ -1559,6 +1457,50 @@ use Src\Log\LoggerInterface;
     }
 
     /**
+     * Inkrementiert einen Wert in einer Spalte
+     *
+     * @param string $column Spaltenname
+     * @param int $amount Inkrementierungswert (Standard: 1)
+     * @return int Anzahl der aktualisierten Zeilen
+     * @throws QueryException Bei Fehlern in der Abfrage
+     */
+    public function increment(string $column, int $amount = 1): int
+    {
+        return $this->updateRaw("`{$column}` = `{$column}` + ?", [$amount]);
+    }
+
+    /**
+     * Führt eine Raw-Update-Abfrage aus
+     *
+     * @param string $expression SQL-Ausdruck für SET
+     * @param array $bindings Parameter-Bindings für den Ausdruck
+     * @return int Anzahl der aktualisierten Zeilen
+     * @throws QueryException Bei Fehlern in der Abfrage
+     */
+    public function updateRaw(string $expression, array $bindings = []): int
+    {
+        $query = $this->compileUpdateRaw($expression);
+        $mergedBindings = array_merge($bindings, $this->getBindings());
+
+        try {
+            $stmt = $this->executeQuery($query, $mergedBindings, ConnectionMode::WRITE);
+
+            // Cache invalidieren
+            $this->invalidateTableCache();
+
+            return $stmt->rowCount();
+        } catch (PDOException $e) {
+            $this->logger->error("Fehler bei UPDATE RAW-Abfrage", [
+                'connection' => $this->connectionName,
+                'query' => $query,
+                'error' => $e->getMessage()
+            ]);
+
+            throw new QueryException("Fehler bei UPDATE RAW-Abfrage: {$e->getMessage()}", $e->getCode(), $e);
+        }
+    }
+
+    /**
      * Kompiliert eine Raw-UPDATE-Abfrage
      *
      * @param string $expression SET-Ausdruck
@@ -1575,6 +1517,48 @@ use Src\Log\LoggerInterface;
         }
 
         return $sql;
+    }
+
+    /**
+     * Dekrementiert einen Wert in einer Spalte
+     *
+     * @param string $column Spaltenname
+     * @param int $amount Dekrementierungswert (Standard: 1)
+     * @return int Anzahl der aktualisierten Zeilen
+     * @throws QueryException Bei Fehlern in der Abfrage
+     */
+    public function decrement(string $column, int $amount = 1): int
+    {
+        return $this->updateRaw("`{$column}` = `{$column}` - ?", [$amount]);
+    }
+
+    /**
+     * Löscht Datensätze
+     *
+     * @return int Anzahl der gelöschten Zeilen
+     * @throws QueryException Bei Fehlern in der Abfrage
+     */
+    public function delete(): int
+    {
+        $query = $this->compileDelete();
+        $bindings = $this->getBindings();
+
+        try {
+            $stmt = $this->executeQuery($query, $bindings, ConnectionMode::WRITE);
+
+            // Cache invalidieren
+            $this->invalidateTableCache();
+
+            return $stmt->rowCount();
+        } catch (PDOException $e) {
+            $this->logger->error("Fehler bei DELETE-Abfrage", [
+                'connection' => $this->connectionName,
+                'query' => $query,
+                'error' => $e->getMessage()
+            ]);
+
+            throw new QueryException("Fehler bei DELETE-Abfrage: {$e->getMessage()}", $e->getCode(), $e);
+        }
     }
 
     /**
@@ -1596,22 +1580,41 @@ use Src\Log\LoggerInterface;
     }
 
     /**
-     * Invalidiert alle Cache-Einträge für die aktuelle Tabelle
+     * Führt eine TRUNCATE-Abfrage aus (löscht alle Datensätze und setzt Auto-Increment zurück)
      *
-     * @return void
+     * @return bool True bei Erfolg
+     * @throws QueryException Bei Fehlern in der Abfrage
      */
-    private function invalidateTableCache(): void
+    public function truncate(): bool
     {
-        if ($this->cache instanceof NullCache) {
-            return;
+        $query = "TRUNCATE TABLE {$this->table}";
+
+        try {
+            $this->executeQuery($query, [], ConnectionMode::WRITE);
+
+            // Cache invalidieren
+            $this->invalidateTableCache();
+
+            return true;
+        } catch (PDOException $e) {
+            $this->logger->error("Fehler bei TRUNCATE-Abfrage", [
+                'connection' => $this->connectionName,
+                'query' => $query,
+                'error' => $e->getMessage()
+            ]);
+
+            throw new QueryException("Fehler bei TRUNCATE-Abfrage: {$e->getMessage()}", $e->getCode(), $e);
         }
+    }
 
-        $this->logger->debug("Invalidiere Cache für Tabelle", [
-            'connection' => $this->connectionName,
-            'table' => $this->table
-        ]);
-
-        $this->cache->invalidateByTag("table:{$this->connectionName}:{$this->table}");
+    /**
+     * Erzeugt ein Future-Objekt für asynchrone Abfragen
+     *
+     * @return Future Asynchrones Future-Objekt
+     */
+    public function async(): Future
+    {
+        return new Future($this);
     }
 
     /**
@@ -1673,7 +1676,7 @@ use Src\Log\LoggerInterface;
     {
         try {
             return $callback();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $this->logger->error("Fehler bei Cache-Operation '$operation': " . $e->getMessage(), [
                 'connection' => $this->connectionName,
                 'table' => $this->table,

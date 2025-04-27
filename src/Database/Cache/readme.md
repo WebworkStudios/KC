@@ -1,6 +1,8 @@
 # Redis Database Cache für PHP 8.4 ADR Framework
 
-Diese Erweiterung bietet eine leistungsstarke Redis-basierte Cache-Implementierung für das Datenbankschicht des PHP 8.4 ADR Frameworks. Sie ermöglicht das effiziente Caching von Datenbankabfragen, um die Leistung zu optimieren und die Datenbanklast zu reduzieren.
+Diese Erweiterung bietet eine leistungsstarke Redis-basierte Cache-Implementierung für das Datenbankschicht des PHP 8.4
+ADR Frameworks. Sie ermöglicht das effiziente Caching von Datenbankabfragen, um die Leistung zu optimieren und die
+Datenbanklast zu reduzieren.
 
 ## Hauptmerkmale
 
