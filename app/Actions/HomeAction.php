@@ -1,6 +1,5 @@
 <?php
 
-
 namespace App\Actions;
 
 use Src\Http\Request;
@@ -21,7 +20,7 @@ class HomeAction
     #[Route(path: '/', name: 'home')]
     public function __invoke(Request $request): Response
     {
-        return new Response($this->renderHomePage(), 200);
+        return new Response($this->renderHomePage($request), 200);
     }
 
     /**
@@ -35,7 +34,10 @@ class HomeAction
         $phpVersion = PHP_VERSION;
         $date = date('Y-m-d H:i:s');
 
-        return <<<HTML
+        // Optional: Falls relevante Daten aus dem Request benötigt werden
+        // $name = $request->getRouteParameter('name', 'Standard-Name');
+
+        return <<<'HTML'
 <!DOCTYPE html>
 <html lang="de">
 <head>
