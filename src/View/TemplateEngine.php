@@ -20,7 +20,7 @@ class TemplateEngine
     /** @var array Template-Variablen */
     private array $data = [];
 
-    /** @var array Cache für kompilierte Templates */
+    /** @var array Cache für kompilierte Templates - Maps templatePath zu compiledPath */
     private array $compiledTemplates = [];
 
     /** @var string Verzeichnis für Templates */
@@ -67,6 +67,12 @@ class TemplateEngine
         'component'     => '/\{%\s*component\s+(["\'])(.*?)\1(\s+with\s+(.*?))?\s*%\}/s',
         'endcomponent'  => '/\{%\s*endcomponent\s*%\}/s',
         'yield'         => '/\{%\s*yield\s+(["\'])(.*?)\1\s*%\}/s',
+    ];
+
+    /** @var array Potenziell gefährliche Funktionen, die blockiert werden sollten */
+    private const BLOCKED_FUNCTIONS = [
+        'exec', 'shell_exec', 'system', 'passthru', 'eval',
+        'popen', 'proc_open', 'pcntl_exec', 'assert'
     ];
 
     /**
@@ -249,6 +255,8 @@ class TemplateEngine
             // Prüfen, ob eine neue Kompilierung erforderlich ist
             if ($this->shouldRecompile($templatePath, $compiledPath)) {
                 $this->compileTemplate($templatePath, $compiledPath);
+                // Cache aktualisieren
+                $this->compiledTemplates[$templatePath] = $compiledPath;
             }
 
             // Template mit Daten ausführen
@@ -492,9 +500,17 @@ class TemplateEngine
      *
      * @param string $expression Ausdruck
      * @return string Gesäuberter Ausdruck
+     * @throws TemplateException Wenn gefährliche Funktionen verwendet werden
      */
     private function sanitizeExpression(string $expression): string
     {
+        // Potenziell gefährliche Funktionen blockieren
+        foreach (self::BLOCKED_FUNCTIONS as $func) {
+            if (preg_match('/\b' . preg_quote($func, '/') . '\s*\(/i', $expression)) {
+                throw new TemplateException("Unerlaubte Funktion '$func' im Template-Ausdruck");
+            }
+        }
+
         // Hilfsfunktionen ersetzen (z.B. url('home') -> $this->callFunction('url', ['home'])
         return preg_replace_callback(
             '/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*(.*?)\s*\)/',
@@ -551,6 +567,11 @@ class TemplateEngine
         // Output-Pufferung starten
         ob_start();
 
+        // Bei Verfügbarkeit Opcache nutzen
+        if (function_exists('opcache_compile_file')) {
+            opcache_compile_file($compiledPath);
+        }
+
         // Template einbinden
         include $compiledPath;
 
@@ -574,6 +595,7 @@ class TemplateEngine
      * Beendet die aktuelle Section
      *
      * @return void
+     * @throws TemplateException Wenn keine Section gestartet wurde
      */
     public function endSection(): void
     {
@@ -675,10 +697,19 @@ class TemplateEngine
      */
     private function getCompiledPath(string $templatePath): string
     {
+        // Prüfen, ob der Pfad bereits im Cache ist
+        if (isset($this->compiledTemplates[$templatePath])) {
+            return $this->compiledTemplates[$templatePath];
+        }
+
         // Eindeutigen Namen für das kompilierte Template generieren
         $hash = md5($templatePath);
+        $compiledPath = $this->cacheDir . $hash . '.php';
 
-        return $this->cacheDir . $hash . '.php';
+        // Im In-Memory-Cache speichern
+        $this->compiledTemplates[$templatePath] = $compiledPath;
+
+        return $compiledPath;
     }
 
     /**
@@ -704,6 +735,51 @@ class TemplateEngine
             return true;
         } catch (\Throwable $e) {
             return false;
+        }
+    }
+
+    /**
+     * Entfernt ein einzelnes Template aus dem Cache
+     *
+     * @param string $template Template-Name
+     * @return bool True bei Erfolg
+     */
+    public function clearTemplateCache(string $template): bool
+    {
+        try {
+            $templatePath = $this->resolvePath($template);
+
+            // Aus In-Memory-Cache entfernen
+            if (isset($this->compiledTemplates[$templatePath])) {
+                $compiledPath = $this->compiledTemplates[$templatePath];
+
+                // Aus Dateisystem-Cache entfernen
+                if (file_exists($compiledPath)) {
+                    unlink($compiledPath);
+                }
+
+                unset($this->compiledTemplates[$templatePath]);
+            }
+
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Magische Methode für die String-Konvertierung
+     *
+     * @return string Gerendertes Template
+     */
+    public function __toString(): string
+    {
+        try {
+            return $this->render();
+        } catch (\Throwable $e) {
+            // Fehler protokollieren statt trigger_error
+            error_log('TemplateException in __toString: ' . $e->getMessage());
+            return 'Error rendering template: ' . $e->getMessage();
         }
     }
 }

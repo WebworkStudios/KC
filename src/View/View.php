@@ -94,9 +94,9 @@ class View
         try {
             return $this->render();
         } catch (\Throwable $e) {
-            // Fehler in __toString dürfen keine Exception werfen
-            trigger_error($e->getMessage(), E_USER_ERROR);
-            return '';
+            // Fehler protokollieren statt trigger_error
+            error_log('View Rendering Error: ' . $e->getMessage());
+            return 'Error rendering view: ' . $e->getMessage();
         }
     }
 
