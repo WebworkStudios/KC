@@ -3,6 +3,10 @@
 namespace Src\Database\Traits;
 
 use InvalidArgumentException;
+use Src\Database\PaginationResult;
+use Src\Database\SimplePaginationResult;
+use Src\Database\CursorPaginationResult;
+use Src\Database\Enums\OrderDirection;
 
 /**
  * Trait für Paginierungsfunktionen im QueryBuilder
@@ -85,7 +89,7 @@ trait PaginationTrait
         }
 
         // Sortierrichtung basierend auf $descending Parameter
-        $direction = $descending ? 'DESC' : 'ASC';
+        $direction = $descending ? OrderDirection::DESC : OrderDirection::ASC;
 
         // Aktuelle Abfrage klonen
         $originalQuery = clone $this;
@@ -97,7 +101,7 @@ trait PaginationTrait
         }
 
         // Nach Cursor-Spalte sortieren und Limit setzen
-        $this->orderBy($column, $descending ? 'DESC' : 'ASC')
+        $this->orderBy($column, $direction)
             ->limit($perPage + 1); // Einen zusätzlichen Datensatz für "hasMore" abfragen
 
         // Ergebnisse abrufen
@@ -127,7 +131,7 @@ trait PaginationTrait
             $operator = $descending ? '>' : '<';
 
             $prevQuery->where($column, $operator, $cursor)
-                ->orderBy($column, $descending ? 'ASC' : 'DESC')
+                ->orderBy($column, $descending ? OrderDirection::ASC : OrderDirection::DESC)
                 ->limit(1);
 
             $prevItem = $prevQuery->first();
