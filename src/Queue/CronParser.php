@@ -1,6 +1,5 @@
 <?php
 
-
 namespace Src\Queue;
 
 use DateTime;
@@ -12,15 +11,37 @@ use Exception;
 class CronParser
 {
     /** @var array Definitionen für Textausdrücke */
-    private array $expressions = [
-        '@yearly' => '0 0 1 1 *',
+    private const EXPRESSIONS = [
+        '@yearly'   => '0 0 1 1 *',
         '@annually' => '0 0 1 1 *',
-        '@monthly' => '0 0 1 * *',
-        '@weekly' => '0 0 * * 0',
-        '@daily' => '0 0 * * *',
+        '@monthly'  => '0 0 1 * *',
+        '@weekly'   => '0 0 * * 0',
+        '@daily'    => '0 0 * * *',
         '@midnight' => '0 0 * * *',
-        '@hourly' => '0 * * * *',
+        '@hourly'   => '0 * * * *',
         '@minutely' => '* * * * *',
+    ];
+
+    /** @var array Mapping von Monatsnamen zu Zahlen */
+    private const MONTH_NAMES = [
+        'jan' => 1, 'feb' => 2, 'mar' => 3, 'apr' => 4,
+        'may' => 5, 'jun' => 6, 'jul' => 7, 'aug' => 8,
+        'sep' => 9, 'oct' => 10, 'nov' => 11, 'dec' => 12
+    ];
+
+    /** @var array Mapping von Wochentagsnamen zu Zahlen */
+    private const WEEKDAY_NAMES = [
+        'sun' => 0, 'mon' => 1, 'tue' => 2, 'wed' => 3,
+        'thu' => 4, 'fri' => 5, 'sat' => 6
+    ];
+
+    /** @var array Reguläre Ausdrücke für die Validierung der Segmente */
+    private const PATTERNS = [
+        'minute'  => '/^(?:\*|[0-5]?[0-9](?:-[0-5]?[0-9])?)(?:\/[0-9]+)?(?:,(?:\*|[0-5]?[0-9](?:-[0-5]?[0-9])?)(?:\/[0-9]+)?)*$/',
+        'hour'    => '/^(?:\*|1?[0-9]|2[0-3])(?:-(?:1?[0-9]|2[0-3]))?(?:\/[0-9]+)?(?:,(?:\*|1?[0-9]|2[0-3])(?:-(?:1?[0-9]|2[0-3]))?(?:\/[0-9]+)?)*$/',
+        'day'     => '/^(?:\*|[1-9]|[12][0-9]|3[01])(?:-(?:[1-9]|[12][0-9]|3[01]))?(?:\/[0-9]+)?(?:,(?:\*|[1-9]|[12][0-9]|3[01])(?:-(?:[1-9]|[12][0-9]|3[01]))?(?:\/[0-9]+)?)*$/',
+        'month'   => '/^(?:\*|[1-9]|1[0-2])(?:-(?:[1-9]|1[0-2]))?(?:\/[0-9]+)?(?:,(?:\*|[1-9]|1[0-2])(?:-(?:[1-9]|1[0-2]))?(?:\/[0-9]+)?)*$/',
+        'weekday' => '/^(?:\*|[0-6])(?:-(?:[0-6]))?(?:\/[0-9]+)?(?:,(?:\*|[0-6])(?:-(?:[0-6]))?(?:\/[0-9]+)?)*$/',
     ];
 
     /**
@@ -32,8 +53,8 @@ class CronParser
     public function isValid(string $expression): bool
     {
         // Text-Ausdrücke umwandeln
-        if (isset($this->expressions[$expression])) {
-            $expression = $this->expressions[$expression];
+        if (isset(self::EXPRESSIONS[$expression])) {
+            $expression = self::EXPRESSIONS[$expression];
         }
 
         // Standarddefinition mit 5 Segmenten: Minute, Stunde, Tag, Monat, Wochentag
@@ -43,22 +64,35 @@ class CronParser
             return false;
         }
 
-        // Jedes Segment überprüfen
-        $patterns = [
-            'minute' => '/^(\*|[0-5]?[0-9](-[0-5]?[0-9])?)(\/[0-9]+)?(,(\*|[0-5]?[0-9](-[0-5]?[0-9])?)(\/[0-9]+)?)*$/',
-            'hour' => '/^(\*|1?[0-9]|2[0-3])((-1?[0-9])|(-2[0-3]))?(\/[0-9]+)?(,(\*|1?[0-9]|2[0-3])((-1?[0-9])|(-2[0-3]))?(\/[0-9]+)?)*$/',
-            'day' => '/^(\*|[1-9]|[12][0-9]|3[01])((-[1-9])|(-[12][0-9])|(-3[01]))?(\/[0-9]+)?(,(\*|[1-9]|[12][0-9]|3[01])((-[1-9])|(-[12][0-9])|(-3[01]))?(\/[0-9]+)?)*$/',
-            'month' => '/^(\*|[1-9]|1[0-2])((-[1-9])|(-1[0-2]))?(\/[0-9]+)?(,(\*|[1-9]|1[0-2])((-[1-9])|(-1[0-2]))?(\/[0-9]+)?)*$/',
-            'weekday' => '/^(\*|[0-6])((-[0-6]))?(\/[0-9]+)?(,(\*|[0-6])((-[0-6]))?(\/[0-9]+)?)*$/',
-        ];
+        // Textnamen in Monat und Wochentag ersetzen
+        $segments[3] = $this->replaceNamesWithNumbers($segments[3], self::MONTH_NAMES);
+        $segments[4] = $this->replaceNamesWithNumbers($segments[4], self::WEEKDAY_NAMES);
 
-        foreach (array_keys($patterns) as $i => $name) {
-            if (!preg_match($patterns[$name], $segments[$i])) {
+        // Jedes Segment überprüfen
+        $segmentTypes = ['minute', 'hour', 'day', 'month', 'weekday'];
+
+        foreach ($segmentTypes as $i => $type) {
+            if (!preg_match(self::PATTERNS[$type], $segments[$i])) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    /**
+     * Ersetzt Textnamen in einem Segment durch ihre numerischen Werte
+     *
+     * @param string $segment Cron-Segment
+     * @param array $mapping Name-zu-Zahl-Mapping
+     * @return string Numerisches Segment
+     */
+    private function replaceNamesWithNumbers(string $segment, array $mapping): string
+    {
+        foreach ($mapping as $name => $number) {
+            $segment = str_ireplace($name, $number, $segment);
+        }
+        return $segment;
     }
 
     /**
@@ -74,8 +108,8 @@ class CronParser
         $now = $now ?? new DateTime();
 
         // Text-Ausdrücke umwandeln
-        if (isset($this->expressions[$expression])) {
-            $expression = $this->expressions[$expression];
+        if (isset(self::EXPRESSIONS[$expression])) {
+            $expression = self::EXPRESSIONS[$expression];
         }
 
         $segments = explode(' ', $expression);
@@ -96,12 +130,13 @@ class CronParser
      * @param string $expression Cron-Ausdruck
      * @param DateTime $from Startzeitpunkt für die Berechnung
      * @return DateTime Nächster Ausführungszeitpunkt
+     * @throws Exception Wenn der Cron-Ausdruck ungültig ist
      */
     public function getNextRunDate(string $expression, DateTime $from): DateTime
     {
         // Text-Ausdrücke umwandeln
-        if (isset($this->expressions[$expression])) {
-            $expression = $this->expressions[$expression];
+        if (isset(self::EXPRESSIONS[$expression])) {
+            $expression = self::EXPRESSIONS[$expression];
         }
 
         $segments = explode(' ', $expression);
@@ -109,16 +144,35 @@ class CronParser
             throw new Exception("Ungültiger Cron-Ausdruck: $expression");
         }
 
-        // Cron-Segmente parsen
-        list($minute, $hour, $day, $month, $weekday) = $segments;
+        // Textnamen in Monat und Wochentag ersetzen
+        $segments[3] = $this->replaceNamesWithNumbers($segments[3], self::MONTH_NAMES);
+        $segments[4] = $this->replaceNamesWithNumbers($segments[4], self::WEEKDAY_NAMES);
+
+        // Cron-Segmente
+        [$minute, $hour, $day, $month, $weekday] = $segments;
 
         // Nächsten Ausführungszeitpunkt berechnen
         $next = clone $from;
         $next->modify('+1 minute');
         $next->setTime($next->format('H'), $next->format('i'), 0);
 
+        // Zeitzone sichern, um Probleme mit Sommerzeit zu vermeiden
+        $timezone = $next->getTimezone();
+
+        // Maximale Anzahl von Iterationen, um Endlosschleifen zu vermeiden
+        $maxIterations = 1000;
+        $iterations = 0;
+
         while (!$this->matchesCron($next, $minute, $hour, $day, $month, $weekday)) {
             $next->modify('+1 minute');
+
+            // Zeitzone wiederherstellen (falls durch DST-Wechsel geändert)
+            $next->setTimezone($timezone);
+
+            // Sicherheitsabbruch
+            if (++$iterations >= $maxIterations) {
+                throw new Exception("Maximale Anzahl von Iterationen überschritten beim Berechnen des nächsten Ausführungszeitpunkts");
+            }
         }
 
         return $next;
@@ -167,9 +221,8 @@ class CronParser
         }
 
         // Komma-getrennte Liste
-        if (strpos($segment, ',') !== false) {
-            $parts = explode(',', $segment);
-            foreach ($parts as $part) {
+        if (str_contains($segment, ',')) {
+            foreach (explode(',', $segment) as $part) {
                 if ($this->matchesSegment($value, $part, $min, $max)) {
                     return true;
                 }
@@ -178,29 +231,26 @@ class CronParser
         }
 
         // Schrittweite (z.B. */5)
-        if (strpos($segment, '/') !== false) {
-            list($range, $step) = explode('/', $segment);
+        if (str_contains($segment, '/')) {
+            [$range, $step] = explode('/', $segment);
 
             $step = (int)$step;
             if ($step <= 0) {
                 return false;
             }
 
+            // Alle Werte mit Schrittweite
             if ($range === '*') {
-                return $value % $step === 0;
+                return ($value - $min) % $step === 0;
             }
 
             // Bereich mit Schrittweite
-            if (strpos($range, '-') !== false) {
-                list($start, $end) = explode('-', $range);
+            if (str_contains($range, '-')) {
+                [$start, $end] = explode('-', $range);
                 $start = (int)$start;
                 $end = (int)$end;
 
-                if ($value < $start || $value > $end) {
-                    return false;
-                }
-
-                return ($value - $start) % $step === 0;
+                return $value >= $start && $value <= $end && ($value - $start) % $step === 0;
             }
 
             // Einzelwert mit Schrittweite
@@ -209,12 +259,9 @@ class CronParser
         }
 
         // Bereich (z.B. 1-5)
-        if (strpos($segment, '-') !== false) {
-            list($start, $end) = explode('-', $segment);
-            $start = (int)$start;
-            $end = (int)$end;
-
-            return $value >= $start && $value <= $end;
+        if (str_contains($segment, '-')) {
+            [$start, $end] = explode('-', $segment);
+            return $value >= (int)$start && $value <= (int)$end;
         }
 
         // Einzelner Wert

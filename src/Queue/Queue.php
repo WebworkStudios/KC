@@ -12,7 +12,6 @@ use Src\Queue\Connection\ConnectionInterface;
 use Src\Queue\Exception\JobException;
 use Src\Queue\Exception\QueueException;
 use Src\Queue\Job\JobInterface;
-use Src\Queue\Storage\StorageInterface;
 use Throwable;
 
 /**
