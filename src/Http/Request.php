@@ -14,7 +14,7 @@ class Request
     private ?array $parsedBody = null;
 
     /** @var string[] Gültige HTTP-Methoden */
-    private const VALID_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS', 'TRACE'];
+    private const VALID_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS', 'TRACE', 'CONNECT'];
 
     /**
      * Erstellt eine neue Request-Instanz
@@ -189,6 +189,58 @@ class Request
     }
 
     /**
+     * Prüft, ob eine hochgeladene Datei existiert
+     *
+     * @param string $key Dateifeld-Name
+     * @return bool
+     */
+    public function hasFile(string $key): bool
+    {
+        return isset($this->files[$key]) &&
+            is_array($this->files[$key]) &&
+            isset($this->files[$key]['error']) &&
+            $this->files[$key]['error'] !== UPLOAD_ERR_NO_FILE;
+    }
+
+    /**
+     * Gibt Informationen zu einer hochgeladenen Datei zurück
+     *
+     * @param string $key Dateifeld-Name
+     * @param array|null $default Standardwert, falls Datei nicht existiert
+     * @return array|null
+     */
+    public function getFile(string $key, ?array $default = null): ?array
+    {
+        return $this->hasFile($key) ? $this->files[$key] : $default;
+    }
+
+    /**
+     * Gibt alle hochgeladenen Dateien zurück
+     *
+     * @return array
+     */
+    public function getFiles(): array
+    {
+        return $this->files;
+    }
+
+    /**
+     * Prüft, ob die hochgeladene Datei erfolgreich übertragen wurde
+     *
+     * @param string $key Dateifeld-Name
+     * @return bool
+     */
+    public function isUploadedFileValid(string $key): bool
+    {
+        if (!$this->hasFile($key)) {
+            return false;
+        }
+
+        $file = $this->files[$key];
+        return isset($file['error']) && $file['error'] === UPLOAD_ERR_OK && is_uploaded_file($file['tmp_name']);
+    }
+
+    /**
      * Gibt den Anfrage-Body zurück, basierend auf dem Content-Type
      *
      * @return array|null Der geparste Body oder null, wenn kein Body vorhanden ist
@@ -345,7 +397,7 @@ class Request
      *
      * @return array
      */
-    public function getServerParams(): array
+    public function getServer(): array
     {
         return $this->server;
     }

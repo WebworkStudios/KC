@@ -1,6 +1,5 @@
 <?php
 
-
 namespace Src\Http;
 
 use Exception;
@@ -26,6 +25,24 @@ class Router
 
     /** @var LoggerInterface Logger-Instanz */
     private readonly LoggerInterface $logger;
+
+    /** @var array Kompilierte RegEx-Muster für Routen */
+    private array $compiledRoutePatterns = [];
+
+    /** @var array Parametertyp-Definitionen für Routen */
+    private array $paramTypes = [];
+
+    /** @var array Mapping zwischen Parametertypen und RegEx-Mustern */
+    private array $typePatterns = [
+        'int' => '[0-9]+',
+        'float' => '[0-9]+(?:\.[0-9]+)?',
+        'uuid' => '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+        'slug' => '[a-z0-9]+(?:-[a-z0-9]+)*',
+        'date' => '\d{4}-\d{2}-\d{2}',
+        'alpha' => '[a-zA-Z]+',
+        'alphanumeric' => '[a-zA-Z0-9]+',
+        'string' => '[^/]+' // Standard
+    ];
 
     /**
      * Erstellt einen neuen Router
@@ -150,6 +167,9 @@ class Router
     {
         $methods = is_array($route->methods) ? $route->methods : [$route->methods];
 
+        // Parameter-Typen aus Route extrahieren
+        $this->extractParameterTypes($route->path);
+
         foreach ($methods as $method) {
             $method = strtoupper($method);
 
@@ -171,6 +191,34 @@ class Router
                     'path' => $route->path
                 ]);
             }
+        }
+    }
+
+    /**
+     * Extrahiert Parameter-Typen aus einem Routenpfad (z.B. /users/{id:int}/profile)
+     *
+     * @param string $path Routenpfad
+     * @return void
+     */
+    private function extractParameterTypes(string $path): void
+    {
+        $this->paramTypes[$path] = [];
+        preg_match_all('/\{([^:}]+)(?::([^}]+))?}/', $path, $matches, PREG_SET_ORDER);
+
+        foreach ($matches as $match) {
+            $paramName = $match[1];
+            $paramType = $match[2] ?? 'string';
+
+            if (!isset($this->typePatterns[$paramType])) {
+                $this->logger->warning("Unbekannter Parametertyp in Route", [
+                    'path' => $path,
+                    'param' => $paramName,
+                    'type' => $paramType
+                ]);
+                $paramType = 'string';
+            }
+
+            $this->paramTypes[$path][$paramName] = $paramType;
         }
     }
 
@@ -211,6 +259,12 @@ class Router
                     'name' => $routeData['name'] ?? 'unnamed',
                     'params' => $params
                 ]);
+
+                // Parameter-Typen konvertieren
+                if (isset($this->paramTypes[$routePath])) {
+                    $params = $this->convertParameterTypes($params, $this->paramTypes[$routePath]);
+                }
+
                 return $this->executeAction($routeData, $request, $params);
             }
         }
@@ -315,9 +369,7 @@ class Router
      */
     private function matchRoute(string $routePath, string $requestPath): ?array
     {
-        // Statischen Teil der Route von den Parametern trennen
-        $pattern = preg_replace('/\{([^}]+)\}/', '(?<$1>[^/]+)', $routePath);
-        $pattern = "#^{$pattern}$#";
+        $pattern = $this->getCompiledPattern($routePath);
 
         if (preg_match($pattern, $requestPath, $matches)) {
             // Numerische Matches entfernen
@@ -326,6 +378,68 @@ class Router
         }
 
         return null;
+    }
+
+    /**
+     * Gibt ein kompiliertes RegEx-Muster für einen Routenpfad zurück (mit Caching)
+     *
+     * @param string $routePath Routenpfad
+     * @return string Kompiliertes RegEx-Muster
+     */
+    private function getCompiledPattern(string $routePath): string
+    {
+        if (!isset($this->compiledRoutePatterns[$routePath])) {
+            // Parameter mit Typen erkennen und ersetzen
+            $pattern = preg_replace_callback('/\{([^:}]+)(?::([^}]+))?}/', function($matches) {
+                $name = $matches[1];
+                $type = $matches[2] ?? 'string';
+                $typePattern = $this->typePatterns[$type] ?? $this->typePatterns['string'];
+
+                return "(?<$name>$typePattern)";
+            }, $routePath);
+
+            $this->compiledRoutePatterns[$routePath] = "#^{$pattern}$#";
+        }
+
+        return $this->compiledRoutePatterns[$routePath];
+    }
+
+    /**
+     * Konvertiert Parametertypen basierend auf Typdefinitionen
+     *
+     * @param array $params Extrahierte Parameter
+     * @param array $paramTypes Parametertypen
+     * @return array Konvertierte Parameter
+     */
+    private function convertParameterTypes(array $params, array $paramTypes): array
+    {
+        foreach ($params as $name => $value) {
+            if (isset($paramTypes[$name])) {
+                switch ($paramTypes[$name]) {
+                    case 'int':
+                        $params[$name] = (int)$value;
+                        break;
+                    case 'float':
+                        $params[$name] = (float)$value;
+                        break;
+                    case 'bool':
+                        $params[$name] = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+                        break;
+                    case 'date':
+                        // Konvertiere zu DateTime, falls gültiges Datumsformat
+                        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+                            try {
+                                $params[$name] = new \DateTime($value);
+                            } catch (\Exception $e) {
+                                // Bei ungültigem Datum den String behalten
+                            }
+                        }
+                        break;
+                }
+            }
+        }
+
+        return $params;
     }
 
     /**
@@ -347,8 +461,23 @@ class Router
 
         $url = $this->namedRoutes[$name];
 
+        // Prüfen, ob alle erforderlichen Parameter vorhanden sind
+        preg_match_all('/\{([^:}]+)(?::([^}]+))?}/', $url, $matches);
+        $requiredParams = $matches[1];
+
+        foreach ($requiredParams as $param) {
+            if (!isset($params[$param])) {
+                throw new InvalidArgumentException("Parameter '$param' fehlt für Route '$name'");
+            }
+        }
+
         // Parameter in URL einsetzen
         foreach ($params as $key => $value) {
+            // Für DateTime-Objekte String-Repräsentation verwenden
+            if ($value instanceof \DateTime) {
+                $value = $value->format('Y-m-d');
+            }
+
             $url = str_replace("{{$key}}", (string)$value, $url);
         }
 
