@@ -775,11 +775,13 @@ class TemplateEngine
     public function __toString(): string
     {
         try {
-            return $this->render();
+            // Hier muss geklärt werden, was gerendert werden soll, da kein Template angegeben ist
+            // In diesem Fall geben wir eine aussagekräftige Fehlermeldung zurück
+            return 'TemplateEngine cannot be directly converted to string without a template.';
         } catch (\Throwable $e) {
             // Fehler protokollieren statt trigger_error
-            error_log('TemplateException in __toString: ' . $e->getMessage());
-            return 'Error rendering template: ' . $e->getMessage();
+            error_log('TemplateEngine Error in __toString: ' . $e->getMessage());
+            return 'Error in TemplateEngine: ' . $e->getMessage();
         }
     }
 }
