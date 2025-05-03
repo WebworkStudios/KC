@@ -1,15 +1,13 @@
 <?php
 
-
 namespace Src\Queue\Connection;
 
 use Src\Container\Container;
-use Src\Database\Connection;
-use Src\Database\ConnectionManager;
+use Src\Database\DatabaseFactory;
 use Src\Log\LoggerInterface;
 
 /**
- * Factory für angepasste MySQL-basierte Queue-Verbindungen
+ * Factory für angepasste MySQL-basierte Queue-Verbindungen mit QueryBuilder
  */
 class MySQLConnectionAdapterFactory implements ConnectionFactoryInterface
 {
@@ -25,25 +23,31 @@ class MySQLConnectionAdapterFactory implements ConnectionFactoryInterface
     /** @var string Name der Tabelle für wiederkehrende Jobs */
     private string $recurringJobsTable;
 
+    /** @var string|null Name des Cache-Providers für den QueryBuilder */
+    private ?string $cacheProvider;
+
     /**
-     * Erstellt eine neue MySQL Connection Factory
+     * Erstellt eine neue MySQL Connection Factory für QueryBuilder
      *
      * @param string $connectionName Name der Datenbankverbindung
      * @param string $jobsTable Name der Tabelle für Jobs
      * @param string $failedJobsTable Name der Tabelle für fehlgeschlagene Jobs
      * @param string $recurringJobsTable Name der Tabelle für wiederkehrende Jobs
+     * @param string|null $cacheProvider Name des Cache-Providers für den QueryBuilder
      */
     public function __construct(
-        string $connectionName = 'default',
-        string $jobsTable = 'queue_jobs',
-        string $failedJobsTable = 'queue_failed_jobs',
-        string $recurringJobsTable = 'queue_recurring_jobs'
+        string  $connectionName = 'default',
+        string  $jobsTable = 'queue_jobs',
+        string  $failedJobsTable = 'queue_failed_jobs',
+        string  $recurringJobsTable = 'queue_recurring_jobs',
+        ?string $cacheProvider = null
     )
     {
         $this->connectionName = $connectionName;
         $this->jobsTable = $jobsTable;
         $this->failedJobsTable = $failedJobsTable;
         $this->recurringJobsTable = $recurringJobsTable;
+        $this->cacheProvider = $cacheProvider;
     }
 
     /**
@@ -55,14 +59,16 @@ class MySQLConnectionAdapterFactory implements ConnectionFactoryInterface
         LoggerInterface $logger
     ): ConnectionInterface
     {
-        // ConnectionManager aus dem Container holen
-        $connectionManager = $container->get(ConnectionManager::class);
-
-        // Passende Datenbankverbindung holen
-        $connection = $connectionManager->getConnection($this->connectionName);
+        // QueryBuilder für die Verbindung erstellen
+        $queryBuilder = DatabaseFactory::createQueryBuilder(
+            $this->connectionName,
+            null,
+            $logger,
+            $this->cacheProvider
+        );
 
         return new MySQLConnectionAdapter(
-            $connection,
+            $queryBuilder,
             $queueName,
             $this->jobsTable,
             $this->failedJobsTable,

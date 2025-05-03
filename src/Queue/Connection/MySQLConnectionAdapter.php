@@ -1,13 +1,13 @@
 <?php
 
-
 namespace Src\Queue\Connection;
 
 use DateTime;
 use DateTimeZone;
 use PDO;
 use PDOException;
-use Src\Database\Connection;
+use Src\Database\Enums\OrderDirection;
+use Src\Database\Enums\SqlOperator;
 use Src\Database\QueryBuilder;
 use Src\Log\LoggerInterface;
 use Src\Queue\Exception\QueueException;
@@ -20,8 +20,8 @@ use Throwable;
  */
 class MySQLConnectionAdapter implements ConnectionInterface
 {
-    /** @var Connection Datenbankverbindung */
-    private Connection $connection;
+    /** @var QueryBuilder QueryBuilder-Instanz */
+    private QueryBuilder $queryBuilder;
 
     /** @var string Name der Queue */
     private string $queueName;
@@ -39,9 +39,9 @@ class MySQLConnectionAdapter implements ConnectionInterface
     private LoggerInterface $logger;
 
     /**
-     * Erstellt eine neue MySQL Queue-Verbindung
+     * Erstellt eine neue MySQL Queue-Verbindung mit QueryBuilder
      *
-     * @param Connection $connection Datenbankverbindung
+     * @param QueryBuilder $queryBuilder QueryBuilder-Instanz
      * @param string $queueName Name der Queue
      * @param string $jobsTable Name der Tabelle für Jobs
      * @param string $failedJobsTable Name der Tabelle für fehlgeschlagene Jobs
@@ -49,7 +49,7 @@ class MySQLConnectionAdapter implements ConnectionInterface
      * @param LoggerInterface $logger Logger für Queue-Operationen
      */
     public function __construct(
-        Connection      $connection,
+        QueryBuilder    $queryBuilder,
         string          $queueName,
         string          $jobsTable,
         string          $failedJobsTable,
@@ -57,7 +57,7 @@ class MySQLConnectionAdapter implements ConnectionInterface
         LoggerInterface $logger
     )
     {
-        $this->connection = $connection;
+        $this->queryBuilder = $queryBuilder;
         $this->queueName = $queueName;
         $this->jobsTable = $jobsTable;
         $this->failedJobsTable = $failedJobsTable;
@@ -75,16 +75,15 @@ class MySQLConnectionAdapter implements ConnectionInterface
             try {
                 $uniqueKey = $job->getUniqueKey();
 
-                // QueryBuilder für die Suche nach existierenden eindeutigen Jobs
-                $query = $this->createQueryBuilder()
-                    ->select('id')
-                    ->from($this->jobsTable)
-                    ->where('queue = ?', [$this->queueName])
-                    ->andWhere('unique_key = ?', [$uniqueKey])
-                    ->andWhere('(failed_at IS NULL OR TIMESTAMPDIFF(SECOND, failed_at, NOW()) < 86400)')
-                    ->limit(1);
-
-                $existingJob = $query->fetch();
+                // Existierenden eindeutigen Job suchen
+                $existingJob = $this->queryBuilder
+                    ->table($this->jobsTable)
+                    ->select(['id'])
+                    ->where('queue', $this->queueName)
+                    ->where('unique_key', $uniqueKey)
+                    ->whereRaw('(failed_at IS NULL OR TIMESTAMPDIFF(SECOND, failed_at, NOW()) < 86400)')
+                    ->limit(1)
+                    ->first();
 
                 if ($existingJob) {
                     $this->logger->debug("Eindeutiger Job bereits in Queue", [
@@ -111,10 +110,10 @@ class MySQLConnectionAdapter implements ConnectionInterface
         $uniqueKey = $job->isUnique() ? $job->getUniqueKey() : null;
 
         try {
-            // QueryBuilder für das Einfügen eines neuen Jobs
-            $this->createQueryBuilder()
-                ->insert($this->jobsTable)
-                ->values([
+            // Job einfügen
+            $this->queryBuilder
+                ->table($this->jobsTable)
+                ->insert([
                     'id' => $id,
                     'queue' => $this->queueName,
                     'payload' => $payload,
@@ -122,11 +121,10 @@ class MySQLConnectionAdapter implements ConnectionInterface
                     'unique_key' => $uniqueKey,
                     'created_at' => $now->format('Y-m-d H:i:s'),
                     'execute_at' => $executeAt ? $executeAt->format('Y-m-d H:i:s') : null
-                ])
-                ->execute();
+                ]);
 
             return $id;
-        } catch (PDOException $e) {
+        } catch (Throwable $e) {
             throw new QueueException(
                 "Fehler beim Hinzufügen des Jobs zur Queue: " . $e->getMessage(),
                 $e->getCode(),
@@ -140,57 +138,49 @@ class MySQLConnectionAdapter implements ConnectionInterface
      */
     public function pop(): ?Job
     {
-        $pdo = $this->connection->getPDO();
+        // Für den pop-Vorgang müssen wir mit Transaction arbeiten und "FOR UPDATE" verwenden
+        // Da dies nicht direkt über den QueryBuilder geht, verwenden wir transaction() mit Closure
+        $job = null;
 
         try {
-            // Transaktion starten
-            $pdo->beginTransaction();
+            $this->queryBuilder->transaction(function ($query) use (&$job) {
+                // Direkten PDO-Zugriff für "SELECT ... FOR UPDATE"
+                $connection = $this->queryBuilder->getConnection($this->queryBuilder->getConnectionName(), true);
 
-            // Für bestimmte Operationen wie "FOR UPDATE" müssen wir direktes SQL verwenden,
-            // da der QueryBuilder das nicht unterstützt
-            $stmt = $pdo->prepare("
-                SELECT * FROM {$this->jobsTable}
-                WHERE queue = :queue
-                AND (execute_at IS NULL OR execute_at <= NOW())
-                AND reserved_at IS NULL
-                AND failed_at IS NULL
-                ORDER BY priority DESC, created_at ASC
-                LIMIT 1
-                FOR UPDATE
-            ");
+                $stmt = $connection->prepare("
+                    SELECT * FROM {$this->jobsTable}
+                    WHERE queue = :queue
+                    AND (execute_at IS NULL OR execute_at <= NOW())
+                    AND reserved_at IS NULL
+                    AND failed_at IS NULL
+                    ORDER BY priority DESC, created_at ASC
+                    LIMIT 1
+                    FOR UPDATE
+                ");
 
-            $stmt->execute([':queue' => $this->queueName]);
-            $data = $stmt->fetch(PDO::FETCH_ASSOC);
+                $stmt->execute([':queue' => $this->queueName]);
+                $data = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if (!$data) {
-                $pdo->rollBack();
-                return null;
-            }
+                if (!$data) {
+                    return null; // Keine Jobs gefunden
+                }
 
-            // Job als reserviert markieren
-            $now = new DateTime();
+                // Job als reserviert markieren
+                $now = new DateTime();
 
-            // Hier können wir den QueryBuilder verwenden
-            $this->createQueryBuilder()
-                ->update($this->jobsTable)
-                ->set([
-                    'reserved_at' => $now->format('Y-m-d H:i:s'),
-                    'attempts' => new \Src\Database\Raw('attempts + 1')
-                ])
-                ->where('id = ?', [$data['id']])
-                ->execute();
+                $query->table($this->jobsTable)
+                    ->where('id', $data['id'])
+                    ->update([
+                        'reserved_at' => $now->format('Y-m-d H:i:s'),
+                        'attempts' => (int)$data['attempts'] + 1
+                    ]);
 
-            // Transaktion bestätigen
-            $pdo->commit();
+                // Job-Objekt erstellen
+                $job = $this->createJobFromData($data);
+            });
 
-            // Job-Objekt erstellen
-            return $this->createJobFromData($data);
-        } catch (PDOException $e) {
-            // Transaktion zurückrollen
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-
+            return $job;
+        } catch (Throwable $e) {
             $this->logger->error("Fehler beim Abrufen des Jobs aus der Queue", [
                 'queue' => $this->queueName,
                 'exception' => $e->getMessage()
@@ -210,14 +200,14 @@ class MySQLConnectionAdapter implements ConnectionInterface
     public function remove(string $jobId): bool
     {
         try {
-            $rowCount = $this->createQueryBuilder()
-                ->delete($this->jobsTable)
-                ->where('id = ?', [$jobId])
-                ->andWhere('queue = ?', [$this->queueName])
-                ->execute();
+            $affected = $this->queryBuilder
+                ->table($this->jobsTable)
+                ->where('id', $jobId)
+                ->where('queue', $this->queueName)
+                ->delete();
 
-            return $rowCount > 0;
-        } catch (PDOException $e) {
+            return $affected > 0;
+        } catch (Throwable $e) {
             $this->logger->error("Fehler beim Entfernen des Jobs aus der Queue", [
                 'queue' => $this->queueName,
                 'job_id' => $jobId,
@@ -260,32 +250,31 @@ class MySQLConnectionAdapter implements ConnectionInterface
             $now = new DateTime();
 
             // Prüfen, ob bereits ein wiederkehrender Job mit diesem Namen existiert
-            $existingJob = $this->createQueryBuilder()
-                ->select('id')
-                ->from($this->recurringJobsTable)
-                ->where('queue = ?', [$this->queueName])
-                ->andWhere('name = ?', [$name])
-                ->fetch();
+            $existingJob = $this->queryBuilder
+                ->table($this->recurringJobsTable)
+                ->select(['id'])
+                ->where('queue', $this->queueName)
+                ->where('name', $name)
+                ->first();
 
             if ($existingJob) {
                 // Bestehenden Job aktualisieren
-                $this->createQueryBuilder()
-                    ->update($this->recurringJobsTable)
-                    ->set([
+                $this->queryBuilder
+                    ->table($this->recurringJobsTable)
+                    ->where('id', $existingJob['id'])
+                    ->update([
                         'cron' => $cron,
                         'payload' => $payload,
                         'priority' => $priority,
                         'updated_at' => $now->format('Y-m-d H:i:s')
-                    ])
-                    ->where('id = ?', [$existingJob['id']])
-                    ->execute();
+                    ]);
 
                 return $existingJob['id'];
             } else {
                 // Neuen wiederkehrenden Job erstellen
-                $this->createQueryBuilder()
-                    ->insert($this->recurringJobsTable)
-                    ->values([
+                $this->queryBuilder
+                    ->table($this->recurringJobsTable)
+                    ->insert([
                         'id' => $id,
                         'queue' => $this->queueName,
                         'name' => $name,
@@ -294,12 +283,11 @@ class MySQLConnectionAdapter implements ConnectionInterface
                         'priority' => $priority,
                         'created_at' => $now->format('Y-m-d H:i:s'),
                         'updated_at' => $now->format('Y-m-d H:i:s')
-                    ])
-                    ->execute();
+                    ]);
 
                 return $id;
             }
-        } catch (PDOException $e) {
+        } catch (Throwable $e) {
             $this->logger->error("Fehler beim Registrieren des wiederkehrenden Jobs", [
                 'queue' => $this->queueName,
                 'job_name' => $job->getName(),
@@ -330,61 +318,55 @@ class MySQLConnectionAdapter implements ConnectionInterface
             ];
 
             // Anzahl ausstehender Jobs
-            $stats['pending'] = (int)$this->createQueryBuilder()
-                ->select('COUNT(*) as count')
-                ->from($this->jobsTable)
-                ->where('queue = ?', [$this->queueName])
-                ->andWhere('reserved_at IS NULL')
-                ->andWhere('failed_at IS NULL')
-                ->andWhere('(execute_at IS NULL OR execute_at <= NOW())')
-                ->fetchColumn();
+            $stats['pending'] = (int)$this->queryBuilder
+                ->table($this->jobsTable)
+                ->where('queue', $this->queueName)
+                ->whereNull('reserved_at')
+                ->whereNull('failed_at')
+                ->whereRaw('(execute_at IS NULL OR execute_at <= NOW())')
+                ->count();
 
             // Anzahl reservierter Jobs
-            $stats['reserved'] = (int)$this->createQueryBuilder()
-                ->select('COUNT(*) as count')
-                ->from($this->jobsTable)
-                ->where('queue = ?', [$this->queueName])
-                ->andWhere('reserved_at IS NOT NULL')
-                ->andWhere('failed_at IS NULL')
-                ->fetchColumn();
+            $stats['reserved'] = (int)$this->queryBuilder
+                ->table($this->jobsTable)
+                ->where('queue', $this->queueName)
+                ->whereNotNull('reserved_at')
+                ->whereNull('failed_at')
+                ->count();
 
             // Anzahl fehlgeschlagener Jobs
-            $stats['failed'] = (int)$this->createQueryBuilder()
-                ->select('COUNT(*) as count')
-                ->from($this->jobsTable)
-                ->where('queue = ?', [$this->queueName])
-                ->andWhere('failed_at IS NOT NULL')
-                ->fetchColumn();
+            $stats['failed'] = (int)$this->queryBuilder
+                ->table($this->jobsTable)
+                ->where('queue', $this->queueName)
+                ->whereNotNull('failed_at')
+                ->count();
 
             // Anzahl verzögerter Jobs
-            $stats['delayed'] = (int)$this->createQueryBuilder()
-                ->select('COUNT(*) as count')
-                ->from($this->jobsTable)
-                ->where('queue = ?', [$this->queueName])
-                ->andWhere('reserved_at IS NULL')
-                ->andWhere('failed_at IS NULL')
-                ->andWhere('execute_at > NOW()')
-                ->fetchColumn();
+            $stats['delayed'] = (int)$this->queryBuilder
+                ->table($this->jobsTable)
+                ->where('queue', $this->queueName)
+                ->whereNull('reserved_at')
+                ->whereNull('failed_at')
+                ->whereRaw('execute_at > NOW()')
+                ->count();
 
             // Anzahl erledigter Jobs
-            $stats['done'] = (int)$this->createQueryBuilder()
-                ->select('COUNT(*) as count')
-                ->from($this->jobsTable)
-                ->where('queue = ?', [$this->queueName])
-                ->andWhere('last_executed_at IS NOT NULL')
-                ->andWhere('failed_at IS NULL')
-                ->andWhere('reserved_at IS NULL')
-                ->fetchColumn();
+            $stats['done'] = (int)$this->queryBuilder
+                ->table($this->jobsTable)
+                ->where('queue', $this->queueName)
+                ->whereNotNull('last_executed_at')
+                ->whereNull('failed_at')
+                ->whereNull('reserved_at')
+                ->count();
 
             // Anzahl wiederkehrender Jobs
-            $stats['recurring'] = (int)$this->createQueryBuilder()
-                ->select('COUNT(*) as count')
-                ->from($this->recurringJobsTable)
-                ->where('queue = ?', [$this->queueName])
-                ->fetchColumn();
+            $stats['recurring'] = (int)$this->queryBuilder
+                ->table($this->recurringJobsTable)
+                ->where('queue', $this->queueName)
+                ->count();
 
             return $stats;
-        } catch (PDOException $e) {
+        } catch (Throwable $e) {
             $this->logger->error("Fehler beim Abrufen der Queue-Statistiken", [
                 'queue' => $this->queueName,
                 'exception' => $e->getMessage()
@@ -407,18 +389,18 @@ class MySQLConnectionAdapter implements ConnectionInterface
             $cutoff = (new DateTime())->modify("-{$maxAge} seconds");
             $cutoffStr = $cutoff->format('Y-m-d H:i:s');
 
-            $rowCount = $this->createQueryBuilder()
-                ->delete($this->jobsTable)
-                ->where('queue = ?', [$this->queueName])
-                ->andWhere('(
+            $affected = $this->queryBuilder
+                ->table($this->jobsTable)
+                ->where('queue', $this->queueName)
+                ->whereRaw('(
                     (last_executed_at IS NOT NULL AND failed_at IS NULL AND last_executed_at < ?) 
                     OR 
                     (failed_at IS NOT NULL AND failed_at < ?)
                 )', [$cutoffStr, $cutoffStr])
-                ->execute();
+                ->delete();
 
-            return $rowCount;
-        } catch (PDOException $e) {
+            return $affected;
+        } catch (Throwable $e) {
             $this->logger->error("Fehler beim Bereinigen der Queue", [
                 'queue' => $this->queueName,
                 'exception' => $e->getMessage()
@@ -438,13 +420,13 @@ class MySQLConnectionAdapter implements ConnectionInterface
     public function clear(): int
     {
         try {
-            $rowCount = $this->createQueryBuilder()
-                ->delete($this->jobsTable)
-                ->where('queue = ?', [$this->queueName])
-                ->execute();
+            $affected = $this->queryBuilder
+                ->table($this->jobsTable)
+                ->where('queue', $this->queueName)
+                ->delete();
 
-            return $rowCount;
-        } catch (PDOException $e) {
+            return $affected;
+        } catch (Throwable $e) {
             $this->logger->error("Fehler beim Leeren der Queue", [
                 'queue' => $this->queueName,
                 'exception' => $e->getMessage()
@@ -471,16 +453,15 @@ class MySQLConnectionAdapter implements ConnectionInterface
      */
     public function storeFailedJob(Job $job, Throwable $exception): bool
     {
-        $pdo = $this->connection->getPDO();
-
         try {
             $data = $job->toArray();
             $now = new DateTime();
             $id = bin2hex(random_bytes(16));
 
-            // Da die "ON DUPLICATE KEY UPDATE" Syntax etwas komplex für den QueryBuilder ist,
-            // verwenden wir hier direktes SQL
-            $stmt = $pdo->prepare("
+            // Direkten PDO-Zugriff für "ON DUPLICATE KEY UPDATE"
+            $connection = $this->queryBuilder->getConnection($this->queryBuilder->getConnectionName(), true);
+
+            $stmt = $connection->prepare("
                 INSERT INTO {$this->failedJobsTable} (
                     id, queue, job_id, payload, exception, failed_at
                 )
@@ -506,7 +487,7 @@ class MySQLConnectionAdapter implements ConnectionInterface
             ]);
 
             return true;
-        } catch (PDOException $e) {
+        } catch (Throwable $e) {
             $this->logger->error("Fehler beim Speichern des fehlgeschlagenen Jobs", [
                 'queue' => $this->queueName,
                 'job_id' => $job->getId(),
@@ -523,14 +504,13 @@ class MySQLConnectionAdapter implements ConnectionInterface
     public function getFailedJobs(int $limit, int $offset): array
     {
         try {
-            $results = $this->createQueryBuilder()
-                ->select('*')
-                ->from($this->failedJobsTable)
-                ->where('queue = ?', [$this->queueName])
-                ->orderBy('failed_at', 'DESC')
+            $results = $this->queryBuilder
+                ->table($this->failedJobsTable)
+                ->where('queue', $this->queueName)
+                ->orderBy('failed_at', OrderDirection::DESC)
                 ->limit($limit)
                 ->offset($offset)
-                ->fetchAll();
+                ->get();
 
             $failedJobs = [];
             foreach ($results as $data) {
@@ -548,7 +528,7 @@ class MySQLConnectionAdapter implements ConnectionInterface
             }
 
             return $failedJobs;
-        } catch (PDOException $e) {
+        } catch (Throwable $e) {
             $this->logger->error("Fehler beim Abrufen fehlgeschlagener Jobs", [
                 'queue' => $this->queueName,
                 'exception' => $e->getMessage()
@@ -569,12 +549,11 @@ class MySQLConnectionAdapter implements ConnectionInterface
     {
         try {
             // Fehlgeschlagenen Job abrufen
-            $failedJob = $this->createQueryBuilder()
-                ->select('*')
-                ->from($this->failedJobsTable)
-                ->where('id = ?', [$jobId])
-                ->andWhere('queue = ?', [$this->queueName])
-                ->fetch();
+            $failedJob = $this->queryBuilder
+                ->table($this->failedJobsTable)
+                ->where('id', $jobId)
+                ->where('queue', $this->queueName)
+                ->first();
 
             if (!$failedJob) {
                 return false;
@@ -612,11 +591,11 @@ class MySQLConnectionAdapter implements ConnectionInterface
             $newJobId = $this->push($job);
 
             // Fehlgeschlagenen Job löschen
-            $this->createQueryBuilder()
-                ->delete($this->failedJobsTable)
-                ->where('id = ?', [$jobId])
-                ->andWhere('queue = ?', [$this->queueName])
-                ->execute();
+            $this->queryBuilder
+                ->table($this->failedJobsTable)
+                ->where('id', $jobId)
+                ->where('queue', $this->queueName)
+                ->delete();
 
             $this->logger->info("Fehlgeschlagener Job erneut zur Queue hinzugefügt", [
                 'old_job_id' => $jobId,
@@ -641,17 +620,7 @@ class MySQLConnectionAdapter implements ConnectionInterface
      */
     public function close(): void
     {
-        // In dieser Implementierung nichts zu tun, da die Connection vom Framework verwaltet wird
-    }
-
-    /**
-     * Erstellt einen neuen QueryBuilder
-     *
-     * @return QueryBuilder QueryBuilder-Instanz
-     */
-    private function createQueryBuilder(): QueryBuilder
-    {
-        return $this->connection->createQueryBuilder();
+        // In dieser Implementierung nichts zu tun, da die QueryBuilder-Verbindung vom Framework verwaltet wird
     }
 
     /**
