@@ -1,11 +1,11 @@
 <?php
 
-
 namespace Src\Queue\Connection;
 
 use DateTime;
 use DateTimeZone;
 use PDOException;
+use PDO;
 use Src\Database\Enums\OrderDirection;
 use Src\Database\QueryBuilder;
 use Src\Log\LoggerInterface;
@@ -45,18 +45,18 @@ class MySQLQueryBuilderAdapter implements ConnectionInterface
      *
      * @param QueryBuilder $queryBuilder QueryBuilder-Instanz
      * @param string $queueName Name der Queue
+     * @param LoggerInterface $logger Logger für Queue-Operationen
      * @param string $jobsTable Name der Tabelle für Jobs
      * @param string $failedJobsTable Name der Tabelle für fehlgeschlagene Jobs
      * @param string $recurringJobsTable Name der Tabelle für wiederkehrende Jobs
-     * @param LoggerInterface $logger Logger für Queue-Operationen
      */
     public function __construct(
         QueryBuilder    $queryBuilder,
         string          $queueName,
+        LoggerInterface $logger,
         string          $jobsTable = 'queue_jobs',
         string          $failedJobsTable = 'queue_failed_jobs',
-        string          $recurringJobsTable = 'queue_recurring_jobs',
-        LoggerInterface $logger
+        string          $recurringJobsTable = 'queue_recurring_jobs'
     )
     {
         $this->queryBuilder = $queryBuilder;
@@ -153,8 +153,8 @@ class MySQLQueryBuilderAdapter implements ConnectionInterface
                     ->whereRaw('(execute_at IS NULL OR execute_at <= NOW())')
                     ->whereNull('reserved_at')
                     ->whereNull('failed_at')
-                    ->orderBy('priority', \Src\Database\Enums\OrderDirection::DESC)
-                    ->orderBy('created_at', \Src\Database\Enums\OrderDirection::ASC)
+                    ->orderBy('priority', OrderDirection::DESC)
+                    ->orderBy('created_at', OrderDirection::ASC)
                     ->limit(1)
                     ->forUpdate() // FOR UPDATE verwenden
                     ->first();
@@ -389,14 +389,14 @@ class MySQLQueryBuilderAdapter implements ConnectionInterface
             $cutoff = (new DateTime())->modify("-{$maxAge} seconds");
             $cutoffStr = $cutoff->format('Y-m-d H:i:s');
 
+            // SQL-Abfrage mit zwei Parametern für die WHERE-Klausel
+            $sql = "(last_executed_at IS NOT NULL AND failed_at IS NULL AND last_executed_at < ?) " .
+                "OR (failed_at IS NOT NULL AND failed_at < ?)";
+
             $affected = $this->queryBuilder
                 ->table($this->jobsTable)
                 ->where('queue', $this->queueName)
-                ->whereRaw('(
-                    (last_executed_at IS NOT NULL AND failed_at IS NULL AND last_executed_at < ?) 
-                    OR 
-                    (failed_at IS NOT NULL AND failed_at < ?)
-                )', [$cutoffStr, $cutoffStr])
+                ->whereRaw($sql, [$cutoffStr, $cutoffStr])
                 ->delete();
 
             return $affected;
@@ -459,10 +459,10 @@ class MySQLQueryBuilderAdapter implements ConnectionInterface
             $id = bin2hex(random_bytes(16));
 
             // Da wir ON DUPLICATE KEY UPDATE hier brauchen und der QueryBuilder dies
-            // nicht direkt unterstützt, verwenden wir ein Raw-Statement
-            $connection = $this->queryBuilder->getConnection();
+            // nicht direkt unterstützt, verwenden wir ein direktes SQL-Statement
+            $pdo = $this->getConnection(true);
 
-            $stmt = $connection->prepare("
+            $stmt = $pdo->prepare("
                 INSERT INTO {$this->failedJobsTable} (
                     id, queue, job_id, payload, exception, failed_at
                 )
@@ -475,7 +475,7 @@ class MySQLQueryBuilderAdapter implements ConnectionInterface
                     failed_at = VALUES(failed_at)
             ");
 
-            $stmt->execute([
+            $result = $stmt->execute([
                 ':id' => $id,
                 ':queue' => $this->queueName,
                 ':job_id' => $job->getId(),
@@ -487,7 +487,7 @@ class MySQLQueryBuilderAdapter implements ConnectionInterface
                 ':failed_at' => $now->format('Y-m-d H:i:s')
             ]);
 
-            return true;
+            return $result;
         } catch (Throwable $e) {
             $this->logger->error("Fehler beim Speichern des fehlgeschlagenen Jobs", [
                 'queue' => $this->queueName,
@@ -562,7 +562,8 @@ class MySQLQueryBuilderAdapter implements ConnectionInterface
                     ->first();
 
                 if (!$failedJob) {
-                    return false;
+                    // Wir setzen success nicht auf true, da wir keinen Job gefunden haben
+                    return;
                 }
 
                 // Payload dekodieren
@@ -573,7 +574,7 @@ class MySQLQueryBuilderAdapter implements ConnectionInterface
                         'job_id' => $jobId,
                         'queue' => $this->queueName
                     ]);
-                    return false;
+                    return;
                 }
 
                 // Job-Klasse laden
@@ -585,7 +586,7 @@ class MySQLQueryBuilderAdapter implements ConnectionInterface
                         'queue' => $this->queueName,
                         'class' => $jobClass
                     ]);
-                    return false;
+                    return;
                 }
 
                 // Job-Objekt erstellen
@@ -654,14 +655,6 @@ class MySQLQueryBuilderAdapter implements ConnectionInterface
             ? new DateTime($data['reserved_at'], new DateTimeZone('UTC'))
             : null;
 
-        $lastExecutedAt = !empty($data['last_executed_at'])
-            ? new DateTime($data['last_executed_at'], new DateTimeZone('UTC'))
-            : null;
-
-        $failedAt = !empty($data['failed_at'])
-            ? new DateTime($data['failed_at'], new DateTimeZone('UTC'))
-            : null;
-
         // Job-Objekt erstellen
         $job = new Job(
             $data['id'],
@@ -682,12 +675,57 @@ class MySQLQueryBuilderAdapter implements ConnectionInterface
     }
 
     /**
-     * Gibt die zugrundeliegende QueryBuilder-Instanz zurück
+     * Hilfsmethode, um die PDO-Verbindung zu erhalten
      *
-     * @return QueryBuilder
+     * @param bool $forWrite True, wenn eine Schreibverbindung benötigt wird
+     * @return PDO Die PDO-Verbindung
+     * @throws QueueException Wenn die Verbindung nicht hergestellt werden kann
      */
-    public function getQueryBuilder(): QueryBuilder
+    private function getConnection(bool $forWrite = false): PDO
     {
-        return $this->queryBuilder;
+        // Da wir keinen direkten Zugriff auf die PDO-Verbindung haben,
+        // verwenden wir eine Transaktion als Workaround
+        try {
+            $pdo = null;
+
+            // In einer Transaktion haben wir eine aktive Verbindung
+            $this->queryBuilder->transaction(function($query) use (&$pdo, $forWrite) {
+                // Da wir nicht direkt auf die Verbindung zugreifen können,
+                // führen wir eine einfache Abfrage durch und fangen die Verbindung ab
+
+                // Eine Reflection-Technik, die auf die Eigenschaften des QueryBuilder zugreift
+                $reflection = new \ReflectionObject($query);
+
+                // Zugriff auf das connectionManager-Feld
+                $connectionManagerProp = $reflection->getProperty('connectionManager');
+                $connectionManagerProp->setAccessible(true);
+                $connectionManager = $connectionManagerProp->getValue($query);
+
+                // Zugriff auf das connectionName-Feld
+                $connectionNameProp = $reflection->getProperty('connectionName');
+                $connectionNameProp->setAccessible(true);
+                $connectionName = $connectionNameProp->getValue($query);
+
+                // Die aktive PDO-Verbindung holen
+                $pdo = $connectionManager->getConnection($connectionName, $forWrite);
+            });
+
+            if ($pdo === null) {
+                throw new QueueException("Konnte keine PDO-Verbindung erstellen");
+            }
+
+            return $pdo;
+        } catch (Throwable $e) {
+            $this->logger->error("Fehler beim Zugriff auf die Datenbankverbindung", [
+                'exception' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            throw new QueueException(
+                "Fehler beim Zugriff auf die Datenbankverbindung: " . $e->getMessage(),
+                $e->getCode(),
+                $e
+            );
+        }
     }
 }
