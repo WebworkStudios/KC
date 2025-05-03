@@ -674,47 +674,20 @@ class MySQLQueryBuilderAdapter implements ConnectionInterface
         return $job;
     }
 
-    /**
-     * Hilfsmethode, um die PDO-Verbindung zu erhalten
-     *
-     * @param bool $forWrite True, wenn eine Schreibverbindung benötigt wird
-     * @return PDO Die PDO-Verbindung
-     * @throws QueueException Wenn die Verbindung nicht hergestellt werden kann
-     */
     private function getConnection(bool $forWrite = false): PDO
     {
-        // Da wir keinen direkten Zugriff auf die PDO-Verbindung haben,
-        // verwenden wir eine Transaktion als Workaround
         try {
-            $pdo = null;
-
-            // In einer Transaktion haben wir eine aktive Verbindung
-            $this->queryBuilder->transaction(function($query) use (&$pdo, $forWrite) {
-                // Da wir nicht direkt auf die Verbindung zugreifen können,
-                // führen wir eine einfache Abfrage durch und fangen die Verbindung ab
-
-                // Eine Reflection-Technik, die auf die Eigenschaften des QueryBuilder zugreift
+            return $this->queryBuilder->transaction(function($query) use ($forWrite) {
+                // Aktuelle Reflection-API für PHP 8.4 verwenden
                 $reflection = new \ReflectionObject($query);
 
-                // Zugriff auf das connectionManager-Feld
-                $connectionManagerProp = $reflection->getProperty('connectionManager');
-                $connectionManagerProp->setAccessible(true);
-                $connectionManager = $connectionManagerProp->getValue($query);
+                // Auf private Eigenschaft zugreifen (ohne setAccessible)
+                $connectionManager = $reflection->getProperty('connectionManager')->getValue($query);
+                $connectionName = $reflection->getProperty('connectionName')->getValue($query);
 
-                // Zugriff auf das connectionName-Feld
-                $connectionNameProp = $reflection->getProperty('connectionName');
-                $connectionNameProp->setAccessible(true);
-                $connectionName = $connectionNameProp->getValue($query);
-
-                // Die aktive PDO-Verbindung holen
-                $pdo = $connectionManager->getConnection($connectionName, $forWrite);
+                // Die Verbindung zurückgeben
+                return $connectionManager->getConnection($connectionName, $forWrite);
             });
-
-            if ($pdo === null) {
-                throw new QueueException("Konnte keine PDO-Verbindung erstellen");
-            }
-
-            return $pdo;
         } catch (Throwable $e) {
             $this->logger->error("Fehler beim Zugriff auf die Datenbankverbindung", [
                 'exception' => $e->getMessage(),
