@@ -51,9 +51,6 @@ class MySQLQueryBuilderAdapterFactory implements ConnectionFactoryInterface
         $this->cacheProvider = $cacheProvider;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     public function createConnection(
         string          $queueName,
         Container       $container,
@@ -71,10 +68,10 @@ class MySQLQueryBuilderAdapterFactory implements ConnectionFactoryInterface
         return new MySQLQueryBuilderAdapter(
             $queryBuilder,
             $queueName,
+            $logger,
             $this->jobsTable,
             $this->failedJobsTable,
-            $this->recurringJobsTable,
-            $logger
+            $this->recurringJobsTable
         );
     }
 }
