@@ -1,5 +1,6 @@
 <?php
 
+
 namespace Src\Queue\Connection;
 
 use Src\Container\Container;
@@ -7,9 +8,9 @@ use Src\Database\DatabaseFactory;
 use Src\Log\LoggerInterface;
 
 /**
- * Factory für angepasste MySQL-basierte Queue-Verbindungen mit QueryBuilder
+ * Factory für MySQL-basierte Queue-Verbindungen mit QueryBuilder-Integration
  */
-class MySQLConnectionAdapterFactory implements ConnectionFactoryInterface
+class MySQLQueryBuilderAdapterFactory implements ConnectionFactoryInterface
 {
     /** @var string Name der Datenbankverbindung */
     private string $connectionName;
@@ -27,7 +28,7 @@ class MySQLConnectionAdapterFactory implements ConnectionFactoryInterface
     private ?string $cacheProvider;
 
     /**
-     * Erstellt eine neue MySQL Connection Factory für QueryBuilder
+     * Erstellt eine neue MySQL Connection Factory mit QueryBuilder-Integration
      *
      * @param string $connectionName Name der Datenbankverbindung
      * @param string $jobsTable Name der Tabelle für Jobs
@@ -67,7 +68,7 @@ class MySQLConnectionAdapterFactory implements ConnectionFactoryInterface
             $this->cacheProvider
         );
 
-        return new MySQLConnectionAdapter(
+        return new MySQLQueryBuilderAdapter(
             $queryBuilder,
             $queueName,
             $this->jobsTable,
