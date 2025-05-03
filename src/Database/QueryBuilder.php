@@ -74,6 +74,9 @@ use Throwable;
     /** @var string|null Ein zu verwendender Index-Hint */
     private ?string $indexHint = null;
 
+    /** @var bool Whether to add FOR UPDATE to the query */
+    private bool $forUpdate = false;
+
     /**
      * Erstellt einen neuen Query Builder
      *
@@ -143,6 +146,17 @@ use Throwable;
     public function useIndex(string $indexName): self
     {
         $this->indexHint = "USE INDEX ({$indexName})";
+        return $this;
+    }
+
+    /**
+     * Adds FOR UPDATE to the query to lock selected rows
+     *
+     * @return self
+     */
+    public function forUpdate(): self
+    {
+        $this->forUpdate = true;
         return $this;
     }
 
@@ -916,6 +930,11 @@ use Throwable;
             $components[] = "OFFSET {$this->offset}";
         }
 
+        // FOR UPDATE-Teil (neuer Code)
+        if ($this->forUpdate) {
+            $components[] = "FOR UPDATE";
+        }
+
         return implode(' ', $components);
     }
 
@@ -1685,5 +1704,16 @@ use Throwable;
 
             return $default;
         }
+    }
+
+    /**
+     * Erstellt eine Kopie des QueryBuilders
+     *
+     * @return self
+     */
+    public function clone(): self
+    {
+        $clone = clone $this;
+        return $clone;
     }
 }
