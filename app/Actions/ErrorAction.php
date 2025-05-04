@@ -11,6 +11,12 @@ use Src\Http\Route;
  */
 class ErrorAction
 {
+    #[Route(path: '/error/404', name: 'error.not_found')]
+    public function __invoke()
+    {
+        // TODO: Implement __invoke() method.
+    }
+
     /**
      * 404 Not Found Fehlerseite
      *

@@ -351,16 +351,16 @@ class TemplateEngine
 
         // PHP-Code für das Template erstellen
         return '<?php 
-        use function Src\View\e as e; 
-        
-        /**
-         * @param mixed $expression
-         * @return mixed
-         */
-        function e(mixed $expression): mixed { 
-            return htmlspecialchars((string)$expression, ENT_QUOTES, "UTF-8", false); 
-        } 
-        ?>' . $content;
+if (!function_exists("e")) {
+    /**
+     * @param mixed $expression
+     * @return mixed
+     */
+    function e(mixed $expression): mixed { 
+        return htmlspecialchars((string)$expression, ENT_QUOTES, "UTF-8", false); 
+    }
+}
+?>' . $content;
     }
 
     /**

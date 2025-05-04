@@ -20,6 +20,9 @@ $config = new Src\Config([
         'debug' => true,
         'environment' => 'development'
     ],
+    'view' => [
+        'use_cache' => false
+    ],
     'database' => [
         'connections' => [
             'kickerscup' => [
@@ -51,6 +54,7 @@ $config = new Src\Config([
         ]
     ]
 ]);
+
 $container->register(Src\Config::class, $config);
 
 // Configure Database Connections
@@ -100,24 +104,6 @@ $container->register(Src\Security\CsrfTokenManager::class, $csrfTokenManager);
 
 // Register Routes from Action directory
 $router->registerActionsFromDirectory('App\\Actions', BASE_PATH . '/../app/Actions');
-
-// Create necessary directories
-$directories = [
-    BASE_PATH . '/resources/views',
-    BASE_PATH . '/resources/views/layouts',
-    BASE_PATH . '/resources/views/components',
-    BASE_PATH . '/resources/views/partials',
-    BASE_PATH . '/storage/framework/views',
-    BASE_PATH . '/logs',
-    BASE_PATH . '/app/Actions',
-];
-
-foreach ($directories as $dir) {
-    if (!is_dir($dir)) {
-        mkdir($dir, 0755, true);
-    }
-}
-
 
 try {
     // Dispatch the request to the appropriate action
