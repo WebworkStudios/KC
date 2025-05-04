@@ -1,272 +1,161 @@
 <?php
 
-/**
- * Einstiegspunkt für die Anwendung
- *
- * Diese Datei dient als Einstiegspunkt für alle HTTP-Anfragen und implementiert
- * den grundlegenden Request-Routing-Mechanismus nach dem ADR-Pattern
- * (Action-Domain-Responder)
- *
- * PHP Version 8.4
- */
+// Define project root path
+define('BASE_PATH', dirname(__FILE__));
 
-declare(strict_types=1);
+// Load Composer autoloader
+require BASE_PATH . '/../vendor/autoload.php';
 
-// Fehlerbehandlung für Entwicklung
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
+// Initialize Container
+$container = new Src\Container\Container();
 
-// Debug-Modus und Umgebungskonstanten
-define('DEBUG', true);
-define('ENVIRONMENT', 'development'); // 'development', 'testing', 'production'
-define('BASE_PATH', dirname(__DIR__));
-define('APP_URL', 'http://localhost:8000');
+// Register Logger
+$logger = new Src\Log\FileLogger(BASE_PATH . '/logs/app.log', 'debug');
+$container->register(Src\Log\LoggerInterface::class, $logger);
 
-// Performance-Tracking
-$startTime = microtime(true);
-
-// Autoloader laden
-require_once BASE_PATH . '/vendor/autoload.php';
-
-// Basis-Konfiguration laden
-$config = [
+// Load Configuration
+$config = new Src\Config([
     'app' => [
-        'name' => 'PHP 8.4 ADR Framework',
-        'environment' => ENVIRONMENT,
-        'debug' => DEBUG,
-        'url' => APP_URL,
+        'name' => 'PHP 8.4 ADR Framework Demo',
+        'debug' => true,
+        'environment' => 'development'
     ],
+    'database' => [
+        'connections' => [
+            'kickerscup' => [
+                'database' => 'kickerscup',
+                'servers' => [
+                    [
+                        'name' => 'primary',
+                        'host' => 'localhost',
+                        'username' => 'root',
+                        'password' => '',
+                        'port' => 3306,
+                        'type' => 'primary'
+                    ]
+                ]
+            ],
+            'forum' => [
+                'database' => 'forum',
+                'servers' => [
+                    [
+                        'name' => 'primary',
+                        'host' => 'localhost',
+                        'username' => 'root',
+                        'password' => '',
+                        'port' => 3306,
+                        'type' => 'primary'
+                    ]
+                ]
+            ]
+        ]
+    ]
+]);
+$container->register(Src\Config::class, $config);
+
+// Configure Database Connections
+// Configure 'kickerscup' connection
+Src\Database\DatabaseFactory::configureConnection(
+    name: 'kickerscup',
+    database: $config->get('database.connections.kickerscup.database'),
+    servers: $config->get('database.connections.kickerscup.servers'),
+    loadBalancingStrategy: Src\Database\LoadBalancingStrategy::ROUND_ROBIN,
+    defaultMode: Src\Database\Enums\ConnectionMode::READ,
+    logger: $logger
+);
+
+// Configure 'forum' connection
+Src\Database\DatabaseFactory::configureConnection(
+    name: 'forum',
+    database: $config->get('database.connections.forum.database'),
+    servers: $config->get('database.connections.forum.servers'),
+    loadBalancingStrategy: Src\Database\LoadBalancingStrategy::ROUND_ROBIN,
+    defaultMode: Src\Database\Enums\ConnectionMode::READ,
+    logger: $logger
+);
+
+// Set up Cache for QueryBuilder
+$cache = Src\Database\DatabaseFactory::createArrayCache('default_cache');
+
+// Register Router - will be auto-detected
+$router = new Src\Http\Router($container, $logger);
+$container->register(Src\Http\Router::class, $router);
+
+// Set up View Engine and register the View Service Provider
+$viewServiceProvider = new Src\View\ViewServiceProvider();
+$viewServiceProvider->register($container, $config->all());
+
+// Create a Request from global variables
+$request = Src\Http\Request::fromGlobals();
+
+// Set up session
+$sessionFactory = new Src\Session\SessionFactory($logger);
+$session = $sessionFactory->createDefaultSession('development');
+$container->register(Src\Session\SessionInterface::class, $session);
+
+// Set up CSRF protection
+$csrfTokenGenerator = new Src\Security\CsrfTokenGenerator();
+$csrfTokenManager = new Src\Security\CsrfTokenManager($session, $csrfTokenGenerator, $logger);
+$container->register(Src\Security\CsrfTokenManager::class, $csrfTokenManager);
+
+// Register Routes from Action directory
+$router->registerActionsFromDirectory('App\\Actions', BASE_PATH . '/../app/Actions');
+
+// Create necessary directories
+$directories = [
+    BASE_PATH . '/resources/views',
+    BASE_PATH . '/resources/views/layouts',
+    BASE_PATH . '/resources/views/components',
+    BASE_PATH . '/resources/views/partials',
+    BASE_PATH . '/storage/framework/views',
+    BASE_PATH . '/logs',
+    BASE_PATH . '/app/Actions',
 ];
 
-// Bootstrap-Datei laden
-require_once BASE_PATH . '/app/bootstrap.php';
+foreach ($directories as $dir) {
+    if (!is_dir($dir)) {
+        mkdir($dir, 0755, true);
+    }
+}
+
 
 try {
-    // Container initialisieren
-    $container = bootstrapContainer($config);
+    // Dispatch the request to the appropriate action
+    $response = $router->dispatch($request);
 
-    // Logger abrufen
-    $logger = $container->get(Src\Log\LoggerInterface::class);
-    $logger->info('Anwendung gestartet', ['environment' => ENVIRONMENT]);
-
-    // Session initialisieren
-    bootstrapSession($container, $config);
-
-    // Cache initialisieren
-    initializeCache($container, $config);
-
-    // Request erstellen
-    $request = Src\Http\Request::fromGlobals();
-
-    // Router initialisieren
-    $router = new Src\Http\Router($container, $logger);
-    $logger->debug('Router initialisiert');
-
-    // Prüfen, ob das Actions-Verzeichnis existiert
-    $actionsDir = BASE_PATH . '/app/Actions';
-    if (!is_dir($actionsDir)) {
-        throw new RuntimeException("Actions-Verzeichnis nicht gefunden: $actionsDir");
-    }
-
-    // Actions registrieren
-    $router->registerActionsFromDirectory('App\\Actions', $actionsDir);
-    $logger->info('Actions registriert aus Verzeichnis: ' . $actionsDir);
-
-    // Globale Middlewares registrieren
-    $middlewares = [];
-
-    // LoggingMiddleware hinzufügen, wenn verfügbar
-    if ($container->has(Src\Http\Middleware\LoggingMiddleware::class)) {
-        $middlewares[] = $container->get(Src\Http\Middleware\LoggingMiddleware::class);
-    }
-
-    // CSRF-Middleware aktivieren, wenn vorhanden
-    if ($container->has(Src\Http\Middleware\CsrfMiddleware::class) &&
-        ($config['session']['csrf']['enabled'] ?? true)) {
-        $middlewares[] = $container->get(Src\Http\Middleware\CsrfMiddleware::class);
-    }
-
-    // Cache-Middleware aktivieren, wenn vorhanden
-    if ($container->has(Src\Http\Middleware\CacheMiddleware::class) &&
-        ($config['cache']['http']['enabled'] ?? false)) {
-        $middlewares[] = $container->get(Src\Http\Middleware\CacheMiddleware::class);
-    }
-
-    // Request durch Middleware-Stack leiten
-    $processedRequest = $request;
-    foreach ($middlewares as $middleware) {
-        $response = $middleware->process($processedRequest, function($req) use (&$processedRequest) {
-            $processedRequest = $req;
-            return null;
-        });
-
-        // Wenn Middleware eine Response zurückgibt, direkt zurückgeben
-        if ($response instanceof Src\Http\Response) {
-            $logger->info('Response von Middleware erzeugt', [
-                'middleware' => get_class($middleware),
-                'status' => $response->getStatus()
-            ]);
-            $response->send();
-            exit;
-        }
-    }
-
-    // Request dispatchen
-    $response = $router->dispatch($processedRequest);
-
-    // 404 wenn keine Route gefunden wurde
+    // If no route was found, show a 404 page
     if ($response === null) {
-        $logger->warning('Keine Route gefunden für: ' . $request->getPath());
-        $response = new Src\Http\Response('Not Found', 404);
+        $response = Src\Http\Response::notFound('Page not found.');
     }
+
+    // Send the response to the client
+    $response->send();
 } catch (Throwable $e) {
-    // Fehler loggen
-    if (isset($logger)) {
-        Src\Log\LogException::log(
-            $logger,
-            $e,
-            'error',
-            'Fehler beim Verarbeiten der Anfrage',
-            ['request_path' => $request->getPath() ?? '/']
-        );
-    } else {
-        // Fallback, wenn Logger nicht verfügbar
-        error_log('Schwerwiegender Fehler: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
-        error_log($e->getTraceAsString());
-    }
-
-    // Fehlerseite für Entwicklungsumgebung
-    if (DEBUG) {
-        $response = new Src\Http\Response(
-            buildDebugErrorPage($e),
-            500,
-            'text/html'
-        );
-    } else {
-        // Produktionsumgebung: Allgemeine Fehlermeldung
-        $response = new Src\Http\Response('Internal Server Error', 500);
-    }
-}
-
-// Response an Client senden
-$response->send();
-
-// Performance-Messung
-$executionTime = microtime(true) - $startTime;
-if (isset($logger)) {
-    $logger->debug('Anfrage verarbeitet in ' . number_format($executionTime * 1000, 2) . ' ms', [
-        'execution_time_ms' => $executionTime * 1000,
-        'memory_usage' => formatBytes(memory_get_usage(true)),
-        'memory_peak' => formatBytes(memory_get_peak_usage(true))
+    // Log the error
+    $logger->error('Application error: ' . $e->getMessage(), [
+        'exception' => get_class($e),
+        'file' => $e->getFile(),
+        'line' => $e->getLine(),
+        'trace' => $e->getTraceAsString()
     ]);
+
+    // Show a user-friendly error page
+    if ($config->get('app.debug')) {
+        // Show detailed error information in debug mode
+        $errorPage = "<h1>Application Error</h1>";
+        $errorPage .= "<p><strong>Error:</strong> " . htmlspecialchars($e->getMessage()) . "</p>";
+        $errorPage .= "<p><strong>File:</strong> " . htmlspecialchars($e->getFile()) . " on line " . $e->getLine() . "</p>";
+        $errorPage .= "<h2>Stack Trace:</h2>";
+        $errorPage .= "<pre>" . htmlspecialchars($e->getTraceAsString()) . "</pre>";
+    } else {
+        // Show a generic error page in production
+        $errorPage = "<h1>Application Error</h1>";
+        $errorPage .= "<p>An error occurred while processing your request. Please try again later.</p>";
+    }
+
+    $response = new Src\Http\Response($errorPage, 500, 'text/html; charset=UTF-8');
+    $response->send();
 }
 
-// Nur im Debug-Modus in error_log schreiben
-if (DEBUG) {
-    error_log("Ausführungszeit: " . number_format($executionTime * 1000, 2) . " ms");
-}
-
-/**
- * Erzeugt eine Debug-Fehlerseite für die Entwicklungsumgebung
- *
- * @param Throwable $e Die aufgetretene Exception
- * @return string HTML-Code der Fehlerseite
- */
-function buildDebugErrorPage(Throwable $e): string {
-    $title = get_class($e);
-    $message = htmlspecialchars($e->getMessage());
-    $file = htmlspecialchars($e->getFile());
-    $line = $e->getLine();
-    $trace = htmlspecialchars($e->getTraceAsString());
-
-    return <<<HTML
-<!DOCTYPE html>
-<html lang="de">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fehler: {$title}</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-        .error-container {
-            background-color: #f8f8f8;
-            border-left: 5px solid #e74c3c;
-            padding: 1rem 2rem;
-            margin-bottom: 2rem;
-            border-radius: 0 4px 4px 0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #e74c3c;
-            margin-top: 0;
-        }
-        .file-info {
-            background-color: #eee;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            font-family: monospace;
-            margin-bottom: 1rem;
-        }
-        .stack-trace {
-            background-color: #2d3436;
-            color: #dfe6e9;
-            padding: 1rem;
-            border-radius: 4px;
-            font-family: monospace;
-            overflow-x: auto;
-            white-space: pre-wrap;
-        }
-        .footer {
-            margin-top: 2rem;
-            font-size: 0.9rem;
-            color: #7f8c8d;
-            text-align: center;
-        }
-    </style>
-</head>
-<body>
-    <div class="error-container">
-        <h1>{$title}</h1>
-        <p>{$message}</p>
-        <div class="file-info">
-            {$file}:{$line}
-        </div>
-    </div>
-    
-    <h2>Stack Trace</h2>
-    <div class="stack-trace">{$trace}</div>
-    
-    <div class="footer">
-        PHP 8.4 ADR Framework - Debug-Modus ist aktiv
-    </div>
-</body>
-</html>
-HTML;
-}
-
-/**
- * Formatiert Bytes in lesbare Größe
- *
- * @param int $bytes Bytezahl
- * @param int $precision Nachkommastellen
- * @return string Formatierte Größe
- */
-function formatBytes(int $bytes, int $precision = 2): string {
-    $units = ['B', 'KB', 'MB', 'GB', 'TB'];
-
-    $bytes = max($bytes, 0);
-    $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-    $pow = min($pow, count($units) - 1);
-
-    $bytes /= (1 << (10 * $pow));
-
-    return round($bytes, $precision) . ' ' . $units[$pow];
-}
+// Close database connections at the end of the request
+Src\Database\DatabaseFactory::closeConnections();
