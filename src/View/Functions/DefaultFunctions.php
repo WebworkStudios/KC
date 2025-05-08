@@ -85,7 +85,7 @@ class DefaultFunctions implements FunctionProviderInterface
             $this->logger->warning("No router available for URL generation", [
                 'route_name' => $name
             ]);
-            return '#no-router';
+            return '';
         }
 
         try {
@@ -108,7 +108,7 @@ class DefaultFunctions implements FunctionProviderInterface
 
             // Ensure we don't include $ symbols in the error URL
             $cleanName = str_replace('$', '', $name);
-            return '#route-error-' . $cleanName;
+            return $cleanName;
         }
     }
 
