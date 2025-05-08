@@ -1,6 +1,5 @@
 <?php
 
-
 namespace App\Actions\Auth;
 
 use App\Domain\Services\AuthService;
@@ -33,6 +32,7 @@ class LoginProcessAction
     {
         $email = $request->post('email');
         $password = $request->post('password');
+        $remember = (bool)$request->post('remember', false);
 
         // Validierung
         $errors = [];
@@ -49,6 +49,11 @@ class LoginProcessAction
 
         // Wenn Validierungsfehler aufgetreten sind, zurück zum Login-Formular
         if (!empty($errors)) {
+            $this->logger->notice('Login-Versuch mit Validierungsfehlern', [
+                'email' => $email,
+                'errors' => array_keys($errors)
+            ]);
+
             // Fehler in Flash-Message speichern
             $this->session->flash('errors', $errors);
             $this->session->flash('old_input', ['email' => $email]);
@@ -57,9 +62,14 @@ class LoginProcessAction
         }
 
         // Login-Versuch
-        $result = $this->authService->login($email, $password);
+        $result = $this->authService->login($email, $password, $remember);
 
         if (!$result['success']) {
+            $this->logger->notice('Fehlgeschlagener Login-Versuch', [
+                'email' => $email,
+                'error' => $result['message']
+            ]);
+
             // Fehlermeldung anzeigen
             $this->session->flash('error', $result['message']);
             $this->session->flash('old_input', ['email' => $email]);
@@ -67,8 +77,19 @@ class LoginProcessAction
             return Response::redirect('/login');
         }
 
+        $this->logger->info('Erfolgreicher Login', [
+            'user_id' => $result['user']->id ?? null,
+            'email' => $email,
+            'remember' => $remember
+        ]);
+
         // Erfolgreiche Anmeldung, Weiterleitung zum Dashboard
         $this->session->flash('success', 'Du wurdest erfolgreich angemeldet');
-        return Response::redirect('/dashboard');
+
+        // Umleitung zur vorherigen Seite, falls verfügbar, ansonsten zum Dashboard
+        $redirectTo = $this->session->get('redirect_after_login', '/dashboard');
+        $this->session->remove('redirect_after_login');
+
+        return Response::redirect($redirectTo);
     }
 }

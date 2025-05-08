@@ -11,43 +11,25 @@ use Src\View\Functions\DefaultFunctions;
  * Bietet eine einfache und intuitive Syntax für Templates mit Unterstützung für
  * Layouts, Komponenten, Partials und Hilfsfunktionen. Optimiert für Sicherheit
  * und Leistung mit Cache-Unterstützung.
+ *
+ * Unterstützt modernes Template-Syntax:
+ * {{ variable }} - Gibt eine Variable escaped aus
+ * {!! variable !!} - Gibt eine Variable unescaped aus
+ * {% if condition %} {% else %} {% endif %} - Bedingte Anweisungen
+ * {% foreach items as item %} {% endforeach %} - Schleifen
+ * {% extends 'layout' %} - Template-Vererbung
+ * {% section 'name' %} {% endsection %} - Content-Sections
+ * {% yield 'name' 'default' %} - Section-Output
+ * {% include 'partial' %} - Partials einbinden
+ * {% component 'name' with params %} {% endcomponent %} - Komponenten
  */
 class TemplateEngine
 {
-    /** @var array Registrierte Hilfsfunktionen */
-    private array $functions = [];
-
-    /** @var array Template-Variablen */
-    private array $data = [];
-
-    /** @var array Cache für kompilierte Templates - Maps templatePath zu compiledPath */
-    private array $compiledTemplates = [];
-
-    /** @var string Verzeichnis für Templates */
-    private string $templateDir;
-
-    /** @var string Verzeichnis für kompilierte Templates */
-    private string $cacheDir;
-
-    /** @var bool Cache-Nutzung aktiviert/deaktiviert */
-    private bool $useCache;
-
-    /** @var string Aktuelles Layout */
-    private ?string $layout = null;
-
-    /** @var array Gespeicherte Sections */
-    private array $sections = [];
-
-    /** @var string|null Aktuell aktive Section */
-    private ?string $currentSection = null;
-
-    /** @var string[] Stack für Parent-Templates */
-    private array $templateStack = [];
-
-    /** @var Router|null Router-Instanz für URL-Generierung */
-    private ?Router $router = null;
-
-    /** @var array Regex-Pattern für Parsing */
+    /**
+     * Regex-Pattern für Template-Parsing
+     *
+     * @var array
+     */
     private const PATTERNS = [
         'comment'       => '/\{\{--(.+?)--\}\}/s',
         'escaped'       => '/\{\{\s*(.+?)\s*\}\}/s',
@@ -66,14 +48,107 @@ class TemplateEngine
         'include'       => '/\{%\s*include\s+(["\'])(.*?)\1\s*%\}/s',
         'component'     => '/\{%\s*component\s+(["\'])(.*?)\1(\s+with\s+(.*?))?\s*%\}/s',
         'endcomponent'  => '/\{%\s*endcomponent\s*%\}/s',
-        'yield'         => '/\{%\s*yield\s+(["\'])(.*?)\1\s*%\}/s',
+        'yield'         => '/\{%\s*yield\s+(["\'])(.*?)\1(\s+(["\']?)(.*?)\4)?\s*%\}/s', // Unterstützung für Standardwert
+        'isset'         => '/\{%\s*isset\s+(.+?)\s*%\}/s',                                // isset-Direktive
+        'endisset'      => '/\{%\s*endisset\s*%\}/s',                                     // endisset-Direktive
+        'empty'         => '/\{%\s*empty\s+(.+?)\s*%\}/s',                                // empty-Direktive
+        'endempty'      => '/\{%\s*endempty\s*%\}/s',                                     // endempty-Direktive
+        'php'           => '/\{%\s*php\s*%\}(.*?)\{%\s*endphp\s*%\}/s',                   // PHP-Code-Blöcke
     ];
 
-    /** @var array Potenziell gefährliche Funktionen, die blockiert werden sollten */
+    /**
+     * Potenziell gefährliche Funktionen, die blockiert werden sollten
+     *
+     * @var array
+     */
     private const BLOCKED_FUNCTIONS = [
         'exec', 'shell_exec', 'system', 'passthru', 'eval',
         'popen', 'proc_open', 'pcntl_exec', 'assert'
     ];
+
+    /**
+     * Registrierte Hilfsfunktionen
+     *
+     * @var array
+     */
+    private array $functions = [];
+
+    /**
+     * Template-Variablen
+     *
+     * @var array
+     */
+    private array $data = [];
+
+    /**
+     * Cache für kompilierte Templates - Maps templatePath zu compiledPath
+     *
+     * @var array
+     */
+    private array $compiledTemplates = [];
+
+    /**
+     * Verzeichnis für Templates
+     *
+     * @var string
+     */
+    private string $templateDir;
+
+    /**
+     * Verzeichnis für kompilierte Templates
+     *
+     * @var string
+     */
+    private string $cacheDir;
+
+    /**
+     * Cache-Nutzung aktiviert/deaktiviert
+     *
+     * @var bool
+     */
+    private bool $useCache;
+
+    /**
+     * Aktuelles Layout
+     *
+     * @var string|null
+     */
+    private ?string $layout = null;
+
+    /**
+     * Gespeicherte Sections
+     *
+     * @var array
+     */
+    private array $sections = [];
+
+    /**
+     * Aktuell aktive Section
+     *
+     * @var string|null
+     */
+    private ?string $currentSection = null;
+
+    /**
+     * Stack für Parent-Templates
+     *
+     * @var string[]
+     */
+    private array $templateStack = [];
+
+    /**
+     * Stack für Komponenten
+     *
+     * @var array
+     */
+    private array $components = [];
+
+    /**
+     * Router-Instanz für URL-Generierung
+     *
+     * @var Router|null
+     */
+    private ?Router $router = null;
 
     /**
      * Erstellt eine neue Template-Engine-Instanz
@@ -120,11 +195,17 @@ class TemplateEngine
     public function setRouter(Router $router): self
     {
         $this->router = $router;
+
+        // DefaultFunctions mit dem Router aktualisieren
+        $this->registerFunctionProvider(new DefaultFunctions($router));
+
         return $this;
     }
 
     /**
-     * Registriert weitere Standard-Hilfsfunktionen
+     * Registriert die Standard-Hilfsfunktionen
+     *
+     * @return void
      */
     private function registerDefaultFunctions(): void
     {
@@ -147,7 +228,32 @@ class TemplateEngine
             return is_string($value) ? mb_strtolower($value, 'UTF-8') : $value;
         });
 
-        // Weitere Filter hinzufügen...
+        $this->registerFunction('json', function($value, $options = 0) {
+            return json_encode($value, $options | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        });
+
+        $this->registerFunction('date', function($date, $format = 'd.m.Y') {
+            if ($date instanceof \DateTimeInterface) {
+                return $date->format($format);
+            } elseif (is_numeric($date)) {
+                return date($format, $date);
+            } elseif (is_string($date)) {
+                return date($format, strtotime($date));
+            }
+            return '';
+        });
+
+        $this->registerFunction('isset', function($var) {
+            return isset($var);
+        });
+
+        $this->registerFunction('empty', function($var) {
+            return empty($var);
+        });
+
+        $this->registerFunction('trim', function($string, $charlist = " \t\n\r\0\x0B") {
+            return trim($string, $charlist);
+        });
     }
 
     /**
@@ -202,10 +308,10 @@ class TemplateEngine
     /**
      * Setzt das Layout für das Template
      *
-     * @param string $layout Layout-Name
+     * @param string|null $layout Layout-Name oder null, um kein Layout zu verwenden
      * @return self
      */
-    public function layout(string $layout): self
+    public function layout(?string $layout = null): self
     {
         $this->layout = $layout;
         return $this;
@@ -280,8 +386,11 @@ class TemplateEngine
             // Template mit Daten ausführen
             return $this->evaluateTemplate($compiledPath, $data);
         } catch (\Throwable $e) {
+            // Verbesserte Fehlerbehandlung mit Kontextinformationen
+            $errorContext = $this->getErrorContext($templatePath, $e);
+
             throw new TemplateException(
-                "Fehler beim Ausführen des Templates '$template': " . $e->getMessage(),
+                "Fehler beim Ausführen des Templates '$template': " . $e->getMessage() . "\n" . $errorContext,
                 $e->getCode(),
                 $e
             );
@@ -289,6 +398,50 @@ class TemplateEngine
             // Template vom Stack entfernen
             array_pop($this->templateStack);
         }
+    }
+
+    /**
+     * Ermittelt den Fehlerkontext für eine verbesserte Fehlermeldung
+     *
+     * @param string $templatePath Pfad zum Template
+     * @param \Throwable $e Die aufgetretene Exception
+     * @return string Formatierter Fehlerkontext
+     */
+    private function getErrorContext(string $templatePath, \Throwable $e): string
+    {
+        if (!file_exists($templatePath)) {
+            return "Template-Datei nicht gefunden: $templatePath";
+        }
+
+        $lines = file($templatePath);
+        $lineNumber = 0;
+
+        // Versuche, die betroffene Zeile zu finden
+        if (preg_match('/line\s+(\d+)/', $e->getMessage(), $matches)) {
+            $lineNumber = (int)$matches[1];
+        } elseif (preg_match('/on line (\d+)/', $e->getMessage(), $matches)) {
+            $lineNumber = (int)$matches[1];
+        }
+
+        // Wenn keine Zeilennummer gefunden wurde, prüfe Kompilierungsprobleme
+        if ($lineNumber === 0 && $compiledPath = $this->getCompiledPath($templatePath)) {
+            if (file_exists($compiledPath) && preg_match('/line\s+(\d+)/', $e->getMessage(), $matches)) {
+                return "Fehler im kompilierten Code. Bitte überprüfen Sie die Template-Syntax.";
+            }
+        }
+
+        $contextLines = [];
+        if ($lineNumber > 0 && isset($lines[$lineNumber - 1])) {
+            $start = max(0, $lineNumber - 3);
+            $end = min(count($lines) - 1, $lineNumber + 1);
+            $contextLines[] = "Fehlerkontext:";
+            for ($i = $start; $i <= $end; $i++) {
+                $marker = ($i + 1 === $lineNumber) ? ' >>> ' : '     ';
+                $contextLines[] = sprintf("%s%3d: %s", $marker, $i + 1, rtrim($lines[$i]));
+            }
+        }
+
+        return implode("\n", $contextLines);
     }
 
     /**
@@ -342,6 +495,288 @@ class TemplateEngine
     }
 
     /**
+     * Kompiliert einen Template-String
+     *
+     * @param string $content Template-Inhalt
+     * @return string Kompilierter PHP-Code
+     */
+    private function compile(string $content): string
+    {
+        // Kommentare entfernen
+        $content = preg_replace(self::PATTERNS['comment'], '', $content);
+
+        // Layout-Direktiven verarbeiten
+        $content = $this->compileLayoutDirectives($content);
+
+        // Includes verarbeiten
+        $content = $this->compileIncludes($content);
+
+        // Komponenten verarbeiten
+        $content = $this->compileComponents($content);
+
+        // Zusätzliche Direktiven verarbeiten (isset, empty, etc.)
+        $content = $this->compileAdditionalDirectives($content);
+
+        // Kontrollstrukturen verarbeiten
+        $content = $this->compileControlStructures($content);
+
+        // Pipe-Ausdrücke verarbeiten
+        $content = $this->compilePipes($content);
+
+        // PHP-Code-Blöcke verarbeiten
+        $content = $this->compilePhpBlocks($content);
+
+        // Variablen verarbeiten
+        $content = $this->compileVariables($content);
+
+        // PHP-Code für das Template erstellen
+        return '<?php 
+if (!function_exists("e")) {
+    /**
+     * @param mixed $expression
+     * @return mixed
+     */
+    function e(mixed $expression): mixed { 
+        return htmlspecialchars((string)$expression, ENT_QUOTES, "UTF-8", false); 
+    }
+}
+?>' . $content;
+    }
+
+    /**
+     * Kompiliert PHP-Code-Blöcke
+     *
+     * @param string $content Template-Inhalt
+     * @return string Kompilierter Inhalt
+     */
+    private function compilePhpBlocks(string $content): string
+    {
+        return preg_replace_callback(self::PATTERNS['php'], function ($matches) {
+            return '<?php ' . $matches[1] . ' ?>';
+        }, $content);
+    }
+
+    /**
+     * Kompiliert Layout-Direktiven
+     *
+     * @param string $content Template-Inhalt
+     * @return string Kompilierter Inhalt
+     */
+    private function compileLayoutDirectives(string $content): string
+    {
+        // @extends - Layout-Direktive
+        $content = preg_replace_callback(self::PATTERNS['extends'], function ($matches) {
+            return '<?php $this->layout("' . $matches[2] . '"); ?>';
+        }, $content);
+
+        // @section - Section-Direktive
+        $content = preg_replace_callback(self::PATTERNS['section'], function ($matches) {
+            return '<?php $this->startSection("' . $matches[2] . '"); ?>';
+        }, $content);
+
+        // @endsection - EndSection-Direktive
+        $content = preg_replace(self::PATTERNS['endsection'], '<?php $this->endSection(); ?>', $content);
+
+        // @yield - Yield-Direktive
+        $content = preg_replace_callback(self::PATTERNS['yield'], function ($matches) {
+            $name = $matches[2];
+            $default = isset($matches[5]) ? ', "' . addslashes($matches[5]) . '"' : '';
+            return '<?php echo $this->yieldContent("' . $name . '"' . $default . '); ?>';
+        }, $content);
+
+        return $content;
+    }
+
+    /**
+     * Kompiliert Include-Direktiven
+     *
+     * @param string $content Template-Inhalt
+     * @return string Kompilierter Inhalt
+     */
+    private function compileIncludes(string $content): string
+    {
+        return preg_replace_callback(self::PATTERNS['include'], function ($matches) {
+            return '<?php echo $this->includeTemplate("' . $matches[2] . '", get_defined_vars()); ?>';
+        }, $content);
+    }
+
+    /**
+     * Kompiliert Komponenten-Direktiven
+     *
+     * @param string $content Template-Inhalt
+     * @return string Kompilierter Inhalt
+     */
+    private function compileComponents(string $content): string
+    {
+        // @component - Komponenten-Direktive mit optionalen Parametern
+        $content = preg_replace_callback(self::PATTERNS['component'], function ($matches) {
+            $component = $matches[2];
+            $withParams = isset($matches[4]) ? $matches[4] : '';
+
+            // Füge $ zu Variablennamen in Parametern hinzu
+            if (!empty($withParams)) {
+                $withParams = preg_replace('/([\'"])\s*:\s*([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()/', '$1: $$2', $withParams);
+                return '<?php $this->startComponent("' . $component . '", [' . $withParams . ']); ?>';
+            }
+
+            return '<?php $this->startComponent("' . $component . '", []); ?>';
+        }, $content);
+
+        // @endcomponent - EndComponent-Direktive
+        $content = preg_replace(self::PATTERNS['endcomponent'], '<?php echo $this->endComponent(); ?>', $content);
+
+        return $content;
+    }
+
+    /**
+     * Kompiliert zusätzliche Direktiven (isset, empty, etc.)
+     *
+     * @param string $content Template-Inhalt
+     * @return string Kompilierter Inhalt
+     */
+    private function compileAdditionalDirectives(string $content): string
+    {
+        // isset-Direktive kompilieren
+        $content = preg_replace_callback(self::PATTERNS['isset'], function ($matches) {
+            $variable = $matches[1];
+            // Variable automatisch mit $ präfixieren
+            $variable = preg_replace_callback(
+                '/\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()/',
+                function($matches) {
+                    return '$' . $matches[1];
+                },
+                $variable
+            );
+            return '<?php if(isset(' . $this->sanitizeExpression($variable) . ')): ?>';
+        }, $content);
+        $content = preg_replace(self::PATTERNS['endisset'], '<?php endif; ?>', $content);
+
+        // empty-Direktive kompilieren
+        $content = preg_replace_callback(self::PATTERNS['empty'], function ($matches) {
+            $variable = $matches[1];
+            // Variable automatisch mit $ präfixieren
+            $variable = preg_replace_callback(
+                '/\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()/',
+                function($matches) {
+                    return '$' . $matches[1];
+                },
+                $variable
+            );
+            return '<?php if(empty(' . $this->sanitizeExpression($variable) . ')): ?>';
+        }, $content);
+        $content = preg_replace(self::PATTERNS['endempty'], '<?php endif; ?>', $content);
+
+        return $content;
+    }
+    /**
+     * Kompiliert Kontrollstrukturen
+     *
+     * @param string $content Template-Inhalt
+     * @return string Kompilierter Inhalt
+     */
+    private function compileControlStructures(string $content): string
+    {
+        // @if - If-Direktive
+        $content = preg_replace_callback(self::PATTERNS['if'], function ($matches) {
+            $condition = $matches[1];
+            // Füge $ zu Variablennamen hinzu, sofern nicht bereits vorhanden
+            $condition = preg_replace_callback(
+                '/\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()/',
+                function($matches) {
+                    return '$' . $matches[1];
+                },
+                $condition
+            );
+            return '<?php if(' . $this->sanitizeExpression($condition) . '): ?>';
+        }, $content);
+
+        // @elseif - ElseIf-Direktive
+        $content = preg_replace_callback(self::PATTERNS['elseif'], function ($matches) {
+            $condition = $matches[1];
+            // Füge $ zu Variablennamen hinzu, sofern nicht bereits vorhanden
+            $condition = preg_replace_callback(
+                '/\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()/',
+                function($matches) {
+                    return '$' . $matches[1];
+                },
+                $condition
+            );
+            return '<?php elseif(' . $this->sanitizeExpression($condition) . '): ?>';
+        }, $content);
+
+        // @else - Else-Direktive
+        $content = preg_replace(self::PATTERNS['else'], '<?php else: ?>', $content);
+
+        // @endif - EndIf-Direktive
+        $content = preg_replace(self::PATTERNS['endif'], '<?php endif; ?>', $content);
+
+        // @foreach - Foreach-Direktive
+        $content = preg_replace_callback(self::PATTERNS['foreach'], function ($matches) {
+            $forEach = $matches[1];
+
+            // Regex zum Extrahieren der Variablen aus der foreach-Anweisung
+            if (preg_match('/(.+?)\s+as\s+(\w+)(?:\s*=>\s*(\w+))?/', $forEach, $foreachParts)) {
+                $collection = $foreachParts[1];
+                $keyVar = isset($foreachParts[3]) ? $foreachParts[2] : null;
+                $valueVar = isset($foreachParts[3]) ? $foreachParts[3] : $foreachParts[2];
+
+                // Collection-Variable mit $ präfixieren, wenn noch nicht vorhanden
+                if (strpos(trim($collection), '$') !== 0 && !preg_match('/\(.*\)/', $collection)) {
+                    $collection = '$' . trim($collection);
+                } else {
+                    // Komplexerer Ausdruck: Alle Variablen mit $ präfixieren
+                    $collection = preg_replace_callback(
+                        '/\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()/',
+                        function($matches) {
+                            return '$' . $matches[1];
+                        },
+                        $collection
+                    );
+                    $collection = $this->sanitizeExpression($collection);
+                }
+
+                // Stellt sicher, dass die Variablen in der PHP-Schleife ein $-Präfix haben
+                $valueVar = '$' . $valueVar;
+                $keyPart = $keyVar ? '$' . $keyVar . ' => ' : '';
+
+                return '<?php foreach(' . $collection . ' as ' . $keyPart . $valueVar . '): ?>';
+            }
+
+            // Fallback
+            $forEach = preg_replace_callback(
+                '/\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()/',
+                function($matches) {
+                    return '$' . $matches[1];
+                },
+                $forEach
+            );
+            return '<?php foreach(' . $this->sanitizeExpression($forEach) . '): ?>';
+        }, $content);
+
+        // @endforeach - EndForeach-Direktive
+        $content = preg_replace(self::PATTERNS['endforeach'], '<?php endforeach; ?>', $content);
+
+        // @for - For-Direktive
+        $content = preg_replace_callback(self::PATTERNS['for'], function ($matches) {
+            $forLoop = $matches[1];
+            // Füge $ zu Variablennamen hinzu, sofern nicht bereits vorhanden
+            $forLoop = preg_replace_callback(
+                '/\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()/',
+                function($matches) {
+                    return '$' . $matches[1];
+                },
+                $forLoop
+            );
+            return '<?php for(' . $this->sanitizeExpression($forLoop) . '): ?>';
+        }, $content);
+
+        // @endfor - EndFor-Direktive
+        $content = preg_replace(self::PATTERNS['endfor'], '<?php endfor; ?>', $content);
+
+        return $content;
+    }
+
+    /**
      * Kompiliert Pipe-Ausdrücke
      *
      * @param string $content Template-Inhalt
@@ -383,6 +818,11 @@ class TemplateEngine
         $parts = explode('|', $expression);
         $base = trim(array_shift($parts));
 
+        // Base-Variable mit $ präfixieren, wenn es ein einfacher Variablenname ist
+        if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $base) && strpos($base, '$') !== 0) {
+            $base = '$' . $base;
+        }
+
         foreach ($parts as $part) {
             $part = trim($part);
 
@@ -399,170 +839,6 @@ class TemplateEngine
 
         return $base;
     }
-    /**
-     * Kompiliert einen Template-String
-     *
-     * @param string $content Template-Inhalt
-     * @return string Kompilierter PHP-Code
-     */
-    private function compile(string $content): string
-    {
-        // Kommentare entfernen
-        $content = preg_replace(self::PATTERNS['comment'], '', $content);
-
-        // Layout-Direktiven verarbeiten
-        $content = $this->compileLayoutDirectives($content);
-
-        // Includes verarbeiten
-        $content = $this->compileIncludes($content);
-
-        // Komponenten verarbeiten
-        $content = $this->compileComponents($content);
-
-        // Kontrollstrukturen verarbeiten
-        $content = $this->compileControlStructures($content);
-
-        // Pipe-Ausdrücke verarbeiten (NEU!)
-        $content = $this->compilePipes($content);
-
-        // Variablen verarbeiten
-        $content = $this->compileVariables($content);
-
-
-        // PHP-Code für das Template erstellen
-        return '<?php 
-if (!function_exists("e")) {
-    /**
-     * @param mixed $expression
-     * @return mixed
-     */
-    function e(mixed $expression): mixed { 
-        return htmlspecialchars((string)$expression, ENT_QUOTES, "UTF-8", false); 
-    }
-}
-?>' . $content;
-    }
-
-    /**
-     * Kompiliert Layout-Direktiven
-     *
-     * @param string $content Template-Inhalt
-     * @return string Kompilierter Inhalt
-     */
-    private function compileLayoutDirectives(string $content): string
-    {
-        // @extends - Layout-Direktive
-        $content = preg_replace_callback(self::PATTERNS['extends'], function ($matches) {
-            return '<?php $this->layout("' . $matches[2] . '"); ?>';
-        }, $content);
-
-        // @section - Section-Direktive
-        $content = preg_replace_callback(self::PATTERNS['section'], function ($matches) {
-            return '<?php $this->startSection("' . $matches[2] . '"); ?>';
-        }, $content);
-
-        // @endsection - EndSection-Direktive
-        $content = preg_replace(self::PATTERNS['endsection'], '<?php $this->endSection(); ?>', $content);
-
-        // @yield - Yield-Direktive
-        $content = preg_replace_callback(self::PATTERNS['yield'], function ($matches) {
-            return '<?php echo $this->yieldContent("' . $matches[2] . '"); ?>';
-        }, $content);
-
-        return $content;
-    }
-
-    /**
-     * Kompiliert Include-Direktiven
-     *
-     * @param string $content Template-Inhalt
-     * @return string Kompilierter Inhalt
-     */
-    private function compileIncludes(string $content): string
-    {
-        return preg_replace_callback(self::PATTERNS['include'], function ($matches) {
-            return '<?php echo $this->includeTemplate("' . $matches[2] . '", get_defined_vars()); ?>';
-        }, $content);
-    }
-
-    /**
-     * Kompiliert Komponenten-Direktiven
-     *
-     * @param string $content Template-Inhalt
-     * @return string Kompilierter Inhalt
-     */
-    private function compileComponents(string $content): string
-    {
-        // @component - Komponenten-Direktive mit optionalen Parametern
-        $content = preg_replace_callback(self::PATTERNS['component'], function ($matches) {
-            $component = $matches[2];
-            $withParams = isset($matches[4]) ? $matches[4] : '';
-
-            if (!empty($withParams)) {
-                return '<?php $this->startComponent("' . $component . '", [' . $withParams . ']); ?>';
-            }
-
-            return '<?php $this->startComponent("' . $component . '", []); ?>';
-        }, $content);
-
-        // @endcomponent - EndComponent-Direktive
-        $content = preg_replace(self::PATTERNS['endcomponent'], '<?php echo $this->endComponent(); ?>', $content);
-
-        return $content;
-    }
-
-    /**
-     * Kompiliert Kontrollstrukturen
-     *
-     * @param string $content Template-Inhalt
-     * @return string Kompilierter Inhalt
-     */
-    private function compileControlStructures(string $content): string
-    {
-        // @if - If-Direktive
-        $content = preg_replace_callback(self::PATTERNS['if'], function ($matches) {
-            return '<?php if(' . $this->sanitizeExpression($matches[1]) . '): ?>';
-        }, $content);
-
-        // @elseif - ElseIf-Direktive
-        $content = preg_replace_callback(self::PATTERNS['elseif'], function ($matches) {
-            return '<?php elseif(' . $this->sanitizeExpression($matches[1]) . '): ?>';
-        }, $content);
-
-        // @else - Else-Direktive
-        $content = preg_replace(self::PATTERNS['else'], '<?php else: ?>', $content);
-
-        // @endif - EndIf-Direktive
-        $content = preg_replace(self::PATTERNS['endif'], '<?php endif; ?>', $content);
-
-        // @foreach - Foreach-Direktive (GEÄNDERT)
-        $content = preg_replace_callback(self::PATTERNS['foreach'], function ($matches) {
-            // Regex zum Extrahieren der Variable aus der foreach-Anweisung
-            if (preg_match('/(.+)\s+as\s+(\w+)/', $matches[1], $foreachParts)) {
-                $collection = $this->sanitizeExpression($foreachParts[1]);
-                $variable = trim($foreachParts[2]);
-
-                // Stellt sicher, dass die Variable in der PHP-Schleife ein $-Präfix hat
-                return '<?php foreach(' . $collection . ' as $' . $variable . '): ?>';
-            }
-
-            // Fallback zur ursprünglichen Implementierung
-            return '<?php foreach(' . $this->sanitizeExpression($matches[1]) . '): ?>';
-        }, $content);
-
-        // @endforeach - EndForeach-Direktive
-        $content = preg_replace(self::PATTERNS['endforeach'], '<?php endforeach; ?>', $content);
-
-        // @for - For-Direktive
-        $content = preg_replace_callback(self::PATTERNS['for'], function ($matches) {
-            return '<?php for(' . $this->sanitizeExpression($matches[1]) . '): ?>';
-        }, $content);
-
-        // @endfor - EndFor-Direktive
-        $content = preg_replace(self::PATTERNS['endfor'], '<?php endfor; ?>', $content);
-
-        return $content;
-    }
 
     /**
      * Kompiliert Variablen
@@ -572,28 +848,56 @@ if (!function_exists("e")) {
      */
     private function compileVariables(string $content): string
     {
-        // {{ $var }} - Escaped Variables
+        // {{ var }} - Escaped Variables
         $content = preg_replace_callback(self::PATTERNS['escaped'], function ($matches) {
             $expression = $matches[1];
 
             // Prüfen, ob es sich um einen einfachen Variablennamen handelt
             if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', trim($expression))) {
-                // Einfachen Variablennamen mit $ präfixieren
-                return '<?php echo e($' . trim($expression) . '); ?>';
+                // Einfachen Variablennamen mit $ präfixieren, wenn noch nicht vorhanden
+                $varName = trim($expression);
+                if (strpos($varName, '$') !== 0) {
+                    $varName = '$' . $varName;
+                }
+                return '<?php echo e(' . $varName . '); ?>';
             }
+
+            // Automatisch $ zu Variablen hinzufügen, die kein $ am Anfang haben
+            // KORRIGIERT: Verwende eine sichere Methode zur Variablenersetzung
+            $expression = preg_replace_callback(
+                '/\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()/',
+                function($matches) {
+                    return '$' . $matches[1];
+                },
+                $expression
+            );
 
             return '<?php echo e(' . $this->sanitizeExpression($expression) . '); ?>';
         }, $content);
 
-        // {!! $var !!} - Unescaped Variables
+        // {!! var !!} - Unescaped Variables
         $content = preg_replace_callback(self::PATTERNS['raw'], function ($matches) {
             $expression = $matches[1];
 
             // Prüfen, ob es sich um einen einfachen Variablennamen handelt
             if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', trim($expression))) {
-                // Einfachen Variablennamen mit $ präfixieren
-                return '<?php echo $' . trim($expression) . '; ?>';
+                // Einfachen Variablennamen mit $ präfixieren, wenn noch nicht vorhanden
+                $varName = trim($expression);
+                if (strpos($varName, '$') !== 0) {
+                    $varName = '$' . $varName;
+                }
+                return '<?php echo ' . $varName . '; ?>';
             }
+
+            // Automatisch $ zu Variablen hinzufügen, die kein $ am Anfang haben
+            // KORRIGIERT: Verwende eine sichere Methode zur Variablenersetzung
+            $expression = preg_replace_callback(
+                '/\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()/',
+                function($matches) {
+                    return '$' . $matches[1];
+                },
+                $expression
+            );
 
             return '<?php echo ' . $this->sanitizeExpression($expression) . '; ?>';
         }, $content);
@@ -630,6 +934,15 @@ if (!function_exists("e")) {
                         return '$this->callFunction("' . $functionName . '", [])';
                     }
 
+                    // Füge $ zu Variablennamen in Argumenten hinzu
+                    $args = preg_replace_callback(
+                        '/\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()/',
+                        function($matches) {
+                            return '$' . $matches[1];
+                        },
+                        $args
+                    );
+
                     // Wir müssen die Argumente korrekt parsen, da sie komplex sein können
                     return '$this->callFunction("' . $functionName . '", [' . $args . '])';
                 }
@@ -650,13 +963,17 @@ if (!function_exists("e")) {
      * @throws TemplateException Wenn die Funktion nicht registriert ist
      */
     public function callFunction(string $name, array $args): mixed
-    {
-        if (!isset($this->functions[$name])) {
-            throw new TemplateException("Hilfsfunktion '$name' ist nicht registriert");
-        }
-
-        return call_user_func_array($this->functions[$name], $args);
+{
+    if (!isset($this->functions[$name])) {
+        throw new TemplateException("Hilfsfunktion '$name' ist nicht registriert");
     }
+
+    try {
+        return call_user_func_array($this->functions[$name], $args);
+    } catch (\Throwable $e) {
+        throw new TemplateException("Fehler beim Aufrufen der Hilfsfunktion '$name': " . $e->getMessage(), 0, $e);
+    }
+}
 
     /**
      * Führt ein kompiliertes Template aus
@@ -666,24 +983,30 @@ if (!function_exists("e")) {
      * @return string Ausgeführtes Template
      */
     private function evaluateTemplate(string $compiledPath, array $data): string
-    {
-        // Extrahiere die Daten als Variablen für das Template
-        extract($data, EXTR_SKIP);
+{
+    // Extrahiere die Daten als Variablen für das Template
+    extract($data, EXTR_SKIP);
 
-        // Output-Pufferung starten
-        ob_start();
+    // Output-Pufferung starten
+    ob_start();
 
-        // Bei Verfügbarkeit Opcache nutzen
-        if (function_exists('opcache_compile_file')) {
-            opcache_compile_file($compiledPath);
-        }
+    // Bei Verfügbarkeit Opcache nutzen
+    if (function_exists('opcache_compile_file')) {
+        opcache_compile_file($compiledPath);
+    }
 
+    try {
         // Template einbinden
         include $compiledPath;
-
-        // Output-Puffer zurückgeben und leeren
-        return ob_get_clean();
+    } catch (\Throwable $e) {
+        // Output-Puffer leeren
+        ob_end_clean();
+        throw $e;
     }
+
+    // Output-Puffer zurückgeben und leeren
+    return ob_get_clean();
+}
 
     /**
      * Startet eine neue Section
@@ -692,10 +1015,10 @@ if (!function_exists("e")) {
      * @return void
      */
     public function startSection(string $name): void
-    {
-        $this->currentSection = $name;
-        ob_start();
-    }
+{
+    $this->currentSection = $name;
+    ob_start();
+}
 
     /**
      * Beendet die aktuelle Section
@@ -704,14 +1027,14 @@ if (!function_exists("e")) {
      * @throws TemplateException Wenn keine Section gestartet wurde
      */
     public function endSection(): void
-    {
-        if ($this->currentSection === null) {
-            throw new TemplateException("Es wurde keine Section gestartet");
-        }
-
-        $this->sections[$this->currentSection] = ob_get_clean();
-        $this->currentSection = null;
+{
+    if ($this->currentSection === null) {
+        throw new TemplateException("Es wurde keine Section gestartet");
     }
+
+    $this->sections[$this->currentSection] = ob_get_clean();
+    $this->currentSection = null;
+}
 
     /**
      * Gibt den Inhalt einer Section aus
@@ -721,9 +1044,9 @@ if (!function_exists("e")) {
      * @return string Inhalt der Section
      */
     public function yieldContent(string $name, string $default = ''): string
-    {
-        return $this->sections[$name] ?? $default;
-    }
+{
+    return $this->sections[$name] ?? $default;
+}
 
     /**
      * Bindet ein Template ein
@@ -733,9 +1056,9 @@ if (!function_exists("e")) {
      * @return string Eingebundenes Template
      */
     public function includeTemplate(string $template, array $data = []): string
-    {
-        return $this->executeTemplate($template, $data);
-    }
+{
+    return $this->executeTemplate($template, $data);
+}
 
     /**
      * Startet eine neue Komponente
@@ -745,13 +1068,13 @@ if (!function_exists("e")) {
      * @return void
      */
     public function startComponent(string $name, array $data = []): void
-    {
-        $this->startSection('component_' . count($this->templateStack));
-        $this->components[] = [
-            'name' => $name,
-            'data' => $data
-        ];
-    }
+{
+    $this->startSection('component_' . count($this->templateStack));
+    $this->components[] = [
+        'name' => $name,
+        'data' => $data
+    ];
+}
 
     /**
      * Beendet die aktuelle Komponente
@@ -759,16 +1082,16 @@ if (!function_exists("e")) {
      * @return string Gerendertes Komponenten-Template
      */
     public function endComponent(): string
-    {
-        $component = array_pop($this->components);
-        $content = $this->yieldContent('component_' . count($this->templateStack));
+{
+    $component = array_pop($this->components);
+    $content = $this->yieldContent('component_' . count($this->templateStack));
 
-        // Komponenten-Daten mit dem Inhalt zusammenführen
-        $data = array_merge($component['data'], ['slot' => $content]);
+    // Komponenten-Daten mit dem Inhalt zusammenführen
+    $data = array_merge($component['data'], ['slot' => $content]);
 
-        // Komponenten-Template rendern
-        return $this->includeTemplate('components/' . $component['name'], $data);
-    }
+    // Komponenten-Template rendern
+    return $this->includeTemplate('components/' . $component['name'], $data);
+}
 
     /**
      * Löst den vollen Pfad zu einem Template auf
@@ -778,22 +1101,22 @@ if (!function_exists("e")) {
      * @throws TemplateException Wenn das Template nicht gefunden wird
      */
     private function resolvePath(string $template): string
-    {
-        // Dateiendung hinzufügen, wenn nicht vorhanden
-        if (!str_ends_with($template, '.php')) {
-            $template .= '.php';
-        }
-
-        // Vollständigen Pfad erstellen
-        $path = $this->templateDir . $template;
-
-        // Prüfen, ob das Template existiert
-        if (!file_exists($path)) {
-            throw new TemplateException("Template '$path' nicht gefunden");
-        }
-
-        return $path;
+{
+    // Dateiendung hinzufügen, wenn nicht vorhanden
+    if (!str_ends_with($template, '.php')) {
+        $template .= '.php';
     }
+
+    // Vollständigen Pfad erstellen
+    $path = $this->templateDir . $template;
+
+    // Prüfen, ob das Template existiert
+    if (!file_exists($path)) {
+        throw new TemplateException("Template '$path' nicht gefunden");
+    }
+
+    return $path;
+}
 
     /**
      * Generiert den Pfad für ein kompiliertes Template
@@ -802,21 +1125,21 @@ if (!function_exists("e")) {
      * @return string Pfad zum kompilierten Template
      */
     private function getCompiledPath(string $templatePath): string
-    {
-        // Prüfen, ob der Pfad bereits im Cache ist
-        if (isset($this->compiledTemplates[$templatePath])) {
-            return $this->compiledTemplates[$templatePath];
-        }
-
-        // Eindeutigen Namen für das kompilierte Template generieren
-        $hash = md5($templatePath);
-        $compiledPath = $this->cacheDir . $hash . '.php';
-
-        // Im In-Memory-Cache speichern
-        $this->compiledTemplates[$templatePath] = $compiledPath;
-
-        return $compiledPath;
+{
+    // Prüfen, ob der Pfad bereits im Cache ist
+    if (isset($this->compiledTemplates[$templatePath])) {
+        return $this->compiledTemplates[$templatePath];
     }
+
+    // Eindeutigen Namen für das kompilierte Template generieren
+    $hash = md5($templatePath);
+    $compiledPath = $this->cacheDir . $hash . '.php';
+
+    // Im In-Memory-Cache speichern
+    $this->compiledTemplates[$templatePath] = $compiledPath;
+
+    return $compiledPath;
+}
 
     /**
      * Löscht alle kompilierten Templates
@@ -824,25 +1147,25 @@ if (!function_exists("e")) {
      * @return bool True bei Erfolg
      */
     public function clearCache(): bool
-    {
-        try {
-            // Alle Dateien im Cache-Verzeichnis löschen
-            $files = glob($this->cacheDir . '*.php');
+{
+    try {
+        // Alle Dateien im Cache-Verzeichnis löschen
+        $files = glob($this->cacheDir . '*.php');
 
-            foreach ($files as $file) {
-                if (is_file($file)) {
-                    unlink($file);
-                }
+        foreach ($files as $file) {
+            if (is_file($file)) {
+                unlink($file);
             }
-
-            // Cache-Array leeren
-            $this->compiledTemplates = [];
-
-            return true;
-        } catch (\Throwable $e) {
-            return false;
         }
+
+        // Cache-Array leeren
+        $this->compiledTemplates = [];
+
+        return true;
+    } catch (\Throwable $e) {
+        return false;
     }
+}
 
     /**
      * Entfernt ein einzelnes Template aus dem Cache
@@ -851,27 +1174,59 @@ if (!function_exists("e")) {
      * @return bool True bei Erfolg
      */
     public function clearTemplateCache(string $template): bool
-    {
-        try {
-            $templatePath = $this->resolvePath($template);
+{
+    try {
+        $templatePath = $this->resolvePath($template);
 
-            // Aus In-Memory-Cache entfernen
-            if (isset($this->compiledTemplates[$templatePath])) {
-                $compiledPath = $this->compiledTemplates[$templatePath];
+        // Aus In-Memory-Cache entfernen
+        if (isset($this->compiledTemplates[$templatePath])) {
+            $compiledPath = $this->compiledTemplates[$templatePath];
 
-                // Aus Dateisystem-Cache entfernen
-                if (file_exists($compiledPath)) {
-                    unlink($compiledPath);
-                }
-
-                unset($this->compiledTemplates[$templatePath]);
+            // Aus Dateisystem-Cache entfernen
+            if (file_exists($compiledPath)) {
+                unlink($compiledPath);
             }
 
-            return true;
-        } catch (\Throwable $e) {
-            return false;
+            unset($this->compiledTemplates[$templatePath]);
         }
+
+        return true;
+    } catch (\Throwable $e) {
+        return false;
     }
+}
+
+    /**
+     * Debug-Methode zum Anzeigen des kompilierten Templates
+     *
+     * @param string $template Template-Name
+     * @return string|null Der kompilierte PHP-Code oder null bei Fehler
+     */
+    public function debugTemplate(string $template): ?string
+{
+    try {
+        $templatePath = $this->resolvePath($template);
+        $content = @file_get_contents($templatePath);
+
+        if ($content === false) {
+            return null;
+        }
+
+        return $this->compile($content);
+    } catch (\Throwable $e) {
+        return "Fehler beim Kompilieren des Templates: " . $e->getMessage();
+    }
+}
+
+    /**
+     * Gibt die verfügbaren Hilfsfunktionen zurück
+     *
+     * @return array Liste der registrierten Hilfsfunktionen
+     */
+    public function getRegisteredFunctions(): array
+{
+    return array_keys($this->functions);
+}
 
     /**
      * Magische Methode für die String-Konvertierung
@@ -879,15 +1234,15 @@ if (!function_exists("e")) {
      * @return string Gerendertes Template
      */
     public function __toString(): string
-    {
-        try {
-            // Hier muss geklärt werden, was gerendert werden soll, da kein Template angegeben ist
-            // In diesem Fall geben wir eine aussagekräftige Fehlermeldung zurück
-            return 'TemplateEngine cannot be directly converted to string without a template.';
-        } catch (\Throwable $e) {
-            // Fehler protokollieren statt trigger_error
-            error_log('TemplateEngine Error in __toString: ' . $e->getMessage());
-            return 'Error in TemplateEngine: ' . $e->getMessage();
-        }
+{
+    try {
+        // Hier muss geklärt werden, was gerendert werden soll, da kein Template angegeben ist
+        // In diesem Fall geben wir eine aussagekräftige Fehlermeldung zurück
+        return 'TemplateEngine kann nicht direkt in einen String konvertiert werden (kein Template angegeben).';
+    } catch (\Throwable $e) {
+        // Fehler protokollieren statt trigger_error
+        error_log('TemplateEngine Error in __toString: ' . $e->getMessage());
+        return 'Fehler in TemplateEngine: ' . $e->getMessage();
     }
+}
 }

@@ -37,33 +37,46 @@ class LoginAction
     {
         // Wenn der Benutzer bereits angemeldet ist, zur Startseite weiterleiten
         if ($this->authService->isLoggedIn()) {
+            $this->logger->info('Bereits angemeldeter Benutzer versuchte, die Login-Seite aufzurufen');
             return Response::redirect('/');
         }
 
-        // Fehlermeldungen aus der Session abrufen
-        $error = $this->session->get('error');
-        $errors = $this->session->get('errors') ?? [];
+        // Erfolgs- und Fehlermeldungen aus der Session abrufen
+        $success = $this->session->getFlash('success');
+        $error = $this->session->getFlash('error');
+        $errors = $this->session->getFlash('errors') ?? [];
+
+        // Fehler für spezifische Felder extrahieren
         $email_error = $errors['email'] ?? null;
         $password_error = $errors['password'] ?? null;
 
-        // Alte Eingabewerte aus der Session abrufen
-        $old_input = $this->session->get('old_input') ?? [];
+        // Alte Eingabewerte aus der Session für Formular-Persistenz abrufen
+        $old_input = $this->session->getFlash('old_input') ?? [];
         $old_email = $old_input['email'] ?? '';
 
-        // Flash-Daten aus der Session entfernen (nachdem wir sie gelesen haben)
-        if ($this->session->has('error')) {
-            $this->session->remove('error');
-        }
-        if ($this->session->has('errors')) {
-            $this->session->remove('errors');
-        }
-        if ($this->session->has('old_input')) {
-            $this->session->remove('old_input');
+        try {
+            // CSRF-Token für das Formular generieren
+            $csrfToken = $this->csrfTokenManager->getToken('login_form');
+
+            $this->logger->debug('Login-Seite aufgerufen', [
+                'has_errors' => !empty($errors),
+                'has_old_input' => !empty($old_input)
+            ]);
+        } catch (\Throwable $e) {
+            // Fehler beim Generieren des CSRF-Tokens protokollieren
+            $this->logger->error('Fehler beim Generieren des CSRF-Tokens', [
+                'error' => $e->getMessage()
+            ]);
+
+            // String-Token als Fallback
+            $csrfToken = 'fallback_token_' . bin2hex(random_bytes(16));
         }
 
+        // View mit allen benötigten Daten rendern
         return $this->viewFactory->render('auth/login', [
             'title' => 'Anmelden',
-            'csrfToken' => $this->csrfTokenManager->getToken('login_form'),
+            'csrfToken' => $csrfToken,
+            'success' => $success,
             'error' => $error,
             'email_error' => $email_error,
             'password_error' => $password_error,
