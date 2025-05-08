@@ -20,9 +20,6 @@ $config = new Src\Config([
         'debug' => true,
         'environment' => 'development'
     ],
-    'view' => [
-        'use_cache' => false
-    ],
     'database' => [
         'connections' => [
             'kickerscup' => [

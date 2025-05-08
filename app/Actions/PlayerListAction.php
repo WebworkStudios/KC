@@ -17,8 +17,9 @@ readonly class PlayerListAction
     public function __construct(
         private Container       $container,
         private LoggerInterface $logger
-    ) {}
-
+    )
+    {
+    }
 
     #[Route(path: '/players', name: 'player.list')]
     public function __invoke(Request $request): Response
@@ -27,6 +28,7 @@ readonly class PlayerListAction
 
         $players = [];
         $error = null;
+        $playersCount = 0; // Neue Variable für die Anzahl
 
         try {
             // Create QueryBuilder instance for kickerscup database
@@ -34,12 +36,15 @@ readonly class PlayerListAction
 
             // Get all players from the players table
             $players = $query->table('players')
-                ->select(['id', 'name', 'email', 'created_at'])
-                ->orderBy('name')
+                ->select(['player_id', 'first_name', 'last_name', 'created_date'])
+                ->orderBy('player_id')
                 ->get();
 
+            // Anzahl der Spieler berechnen
+            $playersCount = count($players);
+
             $this->logger->info('Successfully fetched players from database', [
-                'count' => count($players)
+                'count' => $playersCount
             ]);
 
         } catch (Throwable $e) {
@@ -54,7 +59,8 @@ readonly class PlayerListAction
         return $view->render('players/list', [
             'title' => 'Player List',
             'players' => $players,
-            'error' => $error
+            'error' => $error,
+            'playersCount' => $playersCount // Neue Variable an die View übergeben
         ]);
     }
 }

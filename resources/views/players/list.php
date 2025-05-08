@@ -19,7 +19,7 @@
 <!-- Test 4: Date formatting (possible issue area) -->
 <p>Date: {{ dateFormat('2023-01-01', 'Y-m-d') }}</p>
 
-<!-- Test 5: Pipe filter -->
-<p>Players count: {{ players|length }}</p>
+<!-- Test 5: Players count (geändert!) -->
+<p>Players count: {{ playersCount }}</p>
 
 {% endsection %}

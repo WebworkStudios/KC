@@ -124,12 +124,30 @@ class TemplateEngine
     }
 
     /**
-     * Registriert alle Standard-Hilfsfunktionen
+     * Registriert weitere Standard-Hilfsfunktionen
      */
     private function registerDefaultFunctions(): void
     {
         $defaultFunctions = new DefaultFunctions($this->router);
         $this->registerFunctionProvider($defaultFunctions);
+
+        // Zusätzliche Filterfunktionen registrieren
+        $this->registerFunction('length', function($value) {
+            if (is_array($value) || $value instanceof \Countable) {
+                return count($value);
+            }
+            return is_string($value) ? mb_strlen($value) : 0;
+        });
+
+        $this->registerFunction('uppercase', function($value) {
+            return is_string($value) ? mb_strtoupper($value, 'UTF-8') : $value;
+        });
+
+        $this->registerFunction('lowercase', function($value) {
+            return is_string($value) ? mb_strtolower($value, 'UTF-8') : $value;
+        });
+
+        // Weitere Filter hinzufügen...
     }
 
     /**
@@ -324,6 +342,64 @@ class TemplateEngine
     }
 
     /**
+     * Kompiliert Pipe-Ausdrücke
+     *
+     * @param string $content Template-Inhalt
+     * @return string Kompilierter Inhalt
+     */
+    private function compilePipes(string $content): string
+    {
+        // Pipe-Ausdrücke in {{...}} und {!!...!!} suchen
+        $patterns = [
+            'escaped' => '/\{\{\s*(.*?\|.*?)\s*\}\}/s',
+            'raw' => '/\{!!\s*(.*?\|.*?)\s*!!\}/s',
+        ];
+
+        foreach ($patterns as $type => $pattern) {
+            $content = preg_replace_callback($pattern, function ($matches) use ($type) {
+                $expression = $matches[1];
+
+                // Pipe-Ausdrücke verarbeiten (z.B. "variable|filter" in "filter(variable)" umwandeln)
+                $processedExpression = $this->processPipeExpression($expression);
+
+                // Zurück in die richtige Syntax umwandeln
+                return $type === 'escaped'
+                    ? '{{ ' . $processedExpression . ' }}'
+                    : '{!! ' . $processedExpression . ' !!}';
+            }, $content);
+        }
+
+        return $content;
+    }
+
+    /**
+     * Verarbeitet einen Pipe-Ausdruck
+     *
+     * @param string $expression Pipe-Ausdruck (z.B. "variable|filter|anotherFilter")
+     * @return string Verarbeiteter Ausdruck (z.B. "anotherFilter(filter(variable))")
+     */
+    private function processPipeExpression(string $expression): string
+    {
+        $parts = explode('|', $expression);
+        $base = trim(array_shift($parts));
+
+        foreach ($parts as $part) {
+            $part = trim($part);
+
+            // Prüfen, ob der Filter Parameter hat (z.B. "limit:10")
+            if (strpos($part, ':') !== false) {
+                list($filter, $params) = explode(':', $part, 2);
+                // Kommas durch Parameter ersetzen
+                $params = str_replace(',', "', '", $params);
+                $base = "$filter($base, '$params')";
+            } else {
+                $base = "$part($base)";
+            }
+        }
+
+        return $base;
+    }
+    /**
      * Kompiliert einen Template-String
      *
      * @param string $content Template-Inhalt
@@ -346,8 +422,12 @@ class TemplateEngine
         // Kontrollstrukturen verarbeiten
         $content = $this->compileControlStructures($content);
 
+        // Pipe-Ausdrücke verarbeiten (NEU!)
+        $content = $this->compilePipes($content);
+
         // Variablen verarbeiten
         $content = $this->compileVariables($content);
+
 
         // PHP-Code für das Template erstellen
         return '<?php 
@@ -455,8 +535,18 @@ if (!function_exists("e")) {
         // @endif - EndIf-Direktive
         $content = preg_replace(self::PATTERNS['endif'], '<?php endif; ?>', $content);
 
-        // @foreach - Foreach-Direktive
+        // @foreach - Foreach-Direktive (GEÄNDERT)
         $content = preg_replace_callback(self::PATTERNS['foreach'], function ($matches) {
+            // Regex zum Extrahieren der Variable aus der foreach-Anweisung
+            if (preg_match('/(.+)\s+as\s+(\w+)/', $matches[1], $foreachParts)) {
+                $collection = $this->sanitizeExpression($foreachParts[1]);
+                $variable = trim($foreachParts[2]);
+
+                // Stellt sicher, dass die Variable in der PHP-Schleife ein $-Präfix hat
+                return '<?php foreach(' . $collection . ' as $' . $variable . '): ?>';
+            }
+
+            // Fallback zur ursprünglichen Implementierung
             return '<?php foreach(' . $this->sanitizeExpression($matches[1]) . '): ?>';
         }, $content);
 
@@ -484,12 +574,28 @@ if (!function_exists("e")) {
     {
         // {{ $var }} - Escaped Variables
         $content = preg_replace_callback(self::PATTERNS['escaped'], function ($matches) {
-            return '<?php echo e(' . $this->sanitizeExpression($matches[1]) . '); ?>';
+            $expression = $matches[1];
+
+            // Prüfen, ob es sich um einen einfachen Variablennamen handelt
+            if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', trim($expression))) {
+                // Einfachen Variablennamen mit $ präfixieren
+                return '<?php echo e($' . trim($expression) . '); ?>';
+            }
+
+            return '<?php echo e(' . $this->sanitizeExpression($expression) . '); ?>';
         }, $content);
 
         // {!! $var !!} - Unescaped Variables
         $content = preg_replace_callback(self::PATTERNS['raw'], function ($matches) {
-            return '<?php echo ' . $this->sanitizeExpression($matches[1]) . '; ?>';
+            $expression = $matches[1];
+
+            // Prüfen, ob es sich um einen einfachen Variablennamen handelt
+            if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', trim($expression))) {
+                // Einfachen Variablennamen mit $ präfixieren
+                return '<?php echo $' . trim($expression) . '; ?>';
+            }
+
+            return '<?php echo ' . $this->sanitizeExpression($expression) . '; ?>';
         }, $content);
 
         return $content;

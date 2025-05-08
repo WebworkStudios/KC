@@ -1051,7 +1051,7 @@ use Throwable;
                 'error' => $e->getMessage()
             ]);
 
-            throw new QueryException("Fehler bei SELECT-Abfrage: {$e->getMessage()}", $e->getCode(), $e);
+            throw new QueryException("Fehler bei SELECT-Abfrage: {$e->getMessage()}", (int)$e->getCode(), $e);
         }
     }
 
