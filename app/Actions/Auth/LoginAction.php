@@ -11,6 +11,7 @@ use Src\Log\LoggerInterface;
 use Src\View\ViewFactory;
 use Src\Security\CsrfTokenManager;
 use Src\Session\SessionInterface;
+use Src\Http\Middleware\CsrfMiddleware;
 
 class LoginAction
 {
@@ -19,6 +20,7 @@ class LoginAction
     private ViewFactory $viewFactory;
     private CsrfTokenManager $csrfTokenManager;
     private SessionInterface $session;
+    private CsrfMiddleware $csrfMiddleware;
 
     public function __construct(
         Container       $container,
@@ -30,6 +32,9 @@ class LoginAction
         $this->viewFactory = $container->get(ViewFactory::class);
         $this->csrfTokenManager = $container->get(CsrfTokenManager::class);
         $this->session = $container->get(SessionInterface::class);
+
+        // Get the CsrfMiddleware which has helper methods for CSRF token generation
+        $this->csrfMiddleware = $container->get(CsrfMiddleware::class);
     }
 
     #[Route(path: '/login', name: 'auth.login', methods: ['GET'])]
@@ -55,8 +60,8 @@ class LoginAction
         $old_email = $old_input['email'] ?? '';
 
         try {
-            // CSRF-Token für das Formular generieren
-            $csrfToken = $this->csrfTokenManager->getToken('login_form');
+            // Generate CSRF token HTML field
+            $csrfTokenField = $this->csrfMiddleware->generateTokenField('login_form');
 
             $this->logger->debug('Login-Seite aufgerufen', [
                 'has_errors' => !empty($errors),
@@ -68,14 +73,14 @@ class LoginAction
                 'error' => $e->getMessage()
             ]);
 
-            // String-Token als Fallback
-            $csrfToken = 'fallback_token_' . bin2hex(random_bytes(16));
+            // Fallback CSRF field
+            $csrfTokenField = '<input type="hidden" name="_csrf" value="fallback_token_' . bin2hex(random_bytes(16)) . '">';
         }
 
         // View mit allen benötigten Daten rendern
         return $this->viewFactory->render('auth/login', [
             'title' => 'Anmelden',
-            'csrfToken' => $csrfToken,
+            'csrfTokenField' => $csrfTokenField,  // Send the complete HTML field instead of just the token
             'success' => $success,
             'error' => $error,
             'email_error' => $email_error,

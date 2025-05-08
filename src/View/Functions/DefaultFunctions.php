@@ -1,10 +1,11 @@
 <?php
 
-
 namespace Src\View\Functions;
 
 use Src\Http\Router;
 use Src\View\FunctionProviderInterface;
+use Src\Log\LoggerInterface;
+use Src\Log\NullLogger;
 
 /**
  * Standard-Hilfsfunktionen für die Template-Engine
@@ -17,13 +18,20 @@ class DefaultFunctions implements FunctionProviderInterface
     private ?Router $router;
 
     /**
+     * @var LoggerInterface Logger for debugging
+     */
+    private LoggerInterface $logger;
+
+    /**
      * Erstellt eine neue DefaultFunctions-Instanz
      *
      * @param Router|null $router Router-Instanz für URL-Generierung
+     * @param LoggerInterface|null $logger Logger for debugging
      */
-    public function __construct(?Router $router = null)
+    public function __construct(?Router $router = null, ?LoggerInterface $logger = null)
     {
         $this->router = $router;
+        $this->logger = $logger ?? new NullLogger();
     }
 
     /**
@@ -74,13 +82,33 @@ class DefaultFunctions implements FunctionProviderInterface
     public function url(string $name, array $params = []): string
     {
         if ($this->router === null) {
+            $this->logger->warning("No router available for URL generation", [
+                'route_name' => $name
+            ]);
             return '#no-router';
         }
 
         try {
+            // Log the route name before generating the URL
+            $this->logger->debug("Generating URL for route", [
+                'route_name' => $name,
+                'params' => $params
+            ]);
+
+            // Remove any $ prefixes from route names (common template engine issue)
+            $name = ltrim($name, '$');
+
             return $this->router->url($name, $params);
         } catch (\Throwable $e) {
-            return '#route-error-' . $name;
+            $this->logger->error("Failed to generate URL for route", [
+                'route_name' => $name,
+                'params' => $params,
+                'error' => $e->getMessage()
+            ]);
+
+            // Ensure we don't include $ symbols in the error URL
+            $cleanName = str_replace('$', '', $name);
+            return '#route-error-' . $cleanName;
         }
     }
 
@@ -94,6 +122,9 @@ class DefaultFunctions implements FunctionProviderInterface
     {
         // Führenden Slash entfernen
         $path = ltrim($path, '/');
+
+        // Remove any $ prefixes (template engine issues)
+        $path = ltrim($path, '$');
 
         // Basis-URL ermitteln
         $baseUrl = isset($_SERVER['REQUEST_SCHEME']) && isset($_SERVER['HTTP_HOST'])
@@ -127,6 +158,11 @@ class DefaultFunctions implements FunctionProviderInterface
 
             return $datetime->format($format);
         } catch (\Throwable $e) {
+            $this->logger->warning("Error formatting date", [
+                'date' => $date,
+                'format' => $format,
+                'error' => $e->getMessage()
+            ]);
             return (string)$date;
         }
     }

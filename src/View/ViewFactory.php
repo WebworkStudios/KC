@@ -1,11 +1,13 @@
 <?php
 
-
 namespace Src\View;
 
 use Src\Http\Response;
 use Src\Http\Router;
+use Src\Log\LoggerInterface;
+use Src\Log\NullLogger;
 use Src\View\Exception\TemplateException;
+use Src\View\Functions\DefaultFunctions;
 
 /**
  * Factory-Klasse für die Erstellung von Views
@@ -18,14 +20,19 @@ class ViewFactory
     /** @var array Globale View-Daten */
     private array $globalData = [];
 
+    /** @var LoggerInterface Logger for debugging */
+    private LoggerInterface $logger;
+
     /**
      * Erstellt eine neue ViewFactory-Instanz
      *
      * @param TemplateEngine $engine Template-Engine-Instanz
+     * @param LoggerInterface|null $logger Logger for debugging
      */
-    public function __construct(TemplateEngine $engine)
+    public function __construct(TemplateEngine $engine, ?LoggerInterface $logger = null)
     {
         $this->engine = $engine;
+        $this->logger = $logger ?? new NullLogger();
     }
 
     /**
@@ -37,7 +44,15 @@ class ViewFactory
      */
     public function make(string $template, array $data = []): View
     {
-        return new View($this->engine, $template, array_merge($this->globalData, $data));
+        $mergedData = array_merge($this->globalData, $data);
+
+        // Debug the data being sent to the template
+        $this->logger->debug("Creating view with template and data", [
+            'template' => $template,
+            'data_keys' => array_keys($mergedData)
+        ]);
+
+        return new View($this->engine, $template, $mergedData);
     }
 
     /**
@@ -105,7 +120,10 @@ class ViewFactory
      */
     public function setRouter(Router $router): self
     {
-        $this->engine->setRouter($router);
+        // Create a new DefaultFunctions with the router and logger
+        $this->engine->registerFunctionProvider(new DefaultFunctions($router, $this->logger));
+
+        $this->logger->debug("Router set for URL generation");
         return $this;
     }
 

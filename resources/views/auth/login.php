@@ -1,114 +1,79 @@
 <?php
+// auth/login.php
 /**
- * Login-Formular View
+ * Login Template
  *
- * Zeigt ein Login-Formular mit Fehlermeldungen und CSRF-Schutz an.
- *
- * @var string $title Seitentitel
- * @var object|string $csrfToken CSRF-Token für das Formular
- * @var string|null $error Allgemeine Fehlermeldung
- * @var string|null $success Erfolgsmeldung
- * @var string|null $email_error Fehlermeldung für das E-Mail-Feld
- * @var string|null $password_error Fehlermeldung für das Passwort-Feld
- * @var string $old_email Vorher eingegebene E-Mail-Adresse
+ * This template displays the login form for user authentication.
  */
 ?>
 
 {% extends 'layouts/main' %}
 
 {% section 'title' %}
-{{ $title }}
+{{ title }}
 {% endsection %}
 
 {% section 'content' %}
-<div class="auth-container">
-    <div class="auth-card">
-        <h1 class="auth-title">{{ $title }}</h1>
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">Anmelden</div>
+                <div class="card-body">
+                    {% if success %}
+                    <div class="alert alert-success">
+                        {{ success }}
+                    </div>
+                    {% endif %}
 
-        {% if $success %}
-        <div class="alert alert-success">
-            {{ $success }}
-        </div>
-        {% endif %}
+                    {% if error %}
+                    <div class="alert alert-danger">
+                        {{ error }}
+                    </div>
+                    {% endif %}
 
-        {% if $error %}
-        <div class="alert alert-danger">
-            {{ $error }}
-        </div>
-        {% endif %}
+                    <form method="POST" action="{{ url('auth.login.process') }}">
+                        {!! csrfTokenField !!}
 
-        <form action="{{ url('auth.login.process') }}" method="post" class="auth-form">
-            {% if $csrfToken %}
-            {% if is_object($csrfToken) && method_exists($csrfToken, 'getValue') %}
-            <input type="hidden" name="_csrf" value="{{ $csrfToken->getValue() }}">
-            {% else %}
-            <input type="hidden" name="_csrf" value="{{ $csrfToken }}">
-            {% endif %}
-            {% endif %}
+                        <div class="mb-3">
+                            <label for="email" class="form-label">E-Mail-Adresse</label>
+                            <input type="email" class="form-control {% if email_error %}is-invalid{% endif %}"
+                                   id="email" name="email" value="{{ old_email }}" required autofocus>
+                            {% if email_error %}
+                            <div class="invalid-feedback">
+                                {{ email_error }}
+                            </div>
+                            {% endif %}
+                        </div>
 
-            <div class="form-group">
-                <label for="email">E-Mail-Adresse</label>
-                <input
-                        type="email"
-                        id="email"
-                        name="email"
-                        class="form-control {{ $email_error ? 'is-invalid' : '' }}"
-                        value="{{ $old_email }}"
-                        required
-                        autocomplete="email"
-                >
-                {% if $email_error %}
-                <div class="invalid-feedback">
-                    {{ $email_error }}
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Passwort</label>
+                            <input type="password" class="form-control {% if password_error %}is-invalid{% endif %}"
+                                   id="password" name="password" required>
+                            {% if password_error %}
+                            <div class="invalid-feedback">
+                                {{ password_error }}
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="remember" name="remember">
+                            <label class="form-check-label" for="remember">Angemeldet bleiben</label>
+                        </div>
+
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">Anmelden</button>
+                        </div>
+                    </form>
+
+                    <div class="mt-3 text-center">
+                        <a href="{{ url('auth.password.request') }}">Passwort vergessen?</a>
+                        <p class="mt-3">Noch kein Konto? <a href="{{ url('auth.register') }}">Registrieren</a></p>
+                    </div>
                 </div>
-                {% endif %}
             </div>
-
-            <div class="form-group">
-                <label for="password">Passwort</label>
-                <input
-                        type="password"
-                        id="password"
-                        name="password"
-                        class="form-control {{ $password_error ? 'is-invalid' : '' }}"
-                        required
-                        autocomplete="current-password"
-                >
-                {% if $password_error %}
-                <div class="invalid-feedback">
-                    {{ $password_error }}
-                </div>
-                {% endif %}
-            </div>
-
-            <div class="form-group form-check">
-                <input type="checkbox" class="form-check-input" id="remember" name="remember" value="1">
-                <label class="form-check-label" for="remember">Angemeldet bleiben</label>
-            </div>
-
-            <div class="form-actions">
-                <button type="submit" class="btn btn-primary">Anmelden</button>
-            </div>
-        </form>
-
-        <div class="auth-links">
-            <a href="{{ url('auth.password.request') }}">Passwort vergessen?</a>
-            <a href="{{ url('auth.register') }}">Noch kein Konto? Jetzt registrieren</a>
         </div>
     </div>
 </div>
-{% endsection %}
-
-{% section 'scripts' %}
-<script>
-    // Fokus auf das erste fehlerhafte Feld oder auf die E-Mail setzen
-    document.addEventListener('DOMContentLoaded', function() {
-        const invalidField = document.querySelector('.is-invalid');
-        if (invalidField) {
-            invalidField.focus();
-        } else {
-            document.getElementById('email').focus();
-        }
-    });
-</script>
 {% endsection %}
