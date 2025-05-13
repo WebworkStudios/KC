@@ -362,9 +362,15 @@ class TemplateEngine
      *
      * @param string $name Slot-Name
      * @return void
+     * @throws TemplateException Wenn bereits ein Slot mit diesem Namen aktiv ist
      */
     public function startSlot(string $name): void
     {
+        // Prüfen, ob bereits ein Slot mit diesem Namen aktiv ist
+        if (in_array($name, $this->slots, true)) {
+            throw new TemplateException("Ein Slot mit dem Namen '$name' ist bereits aktiv");
+        }
+
         $this->slots[] = $name;
         $this->currentSlot = $name;
         ob_start();
@@ -385,6 +391,69 @@ class TemplateEngine
         $name = array_pop($this->slots);
         $this->slotContents[$name] = ob_get_clean();
         $this->currentSlot = count($this->slots) > 0 ? end($this->slots) : null;
+    }
+
+    /**
+     * Prüft, ob ein Slot aktiv ist
+     *
+     * @param string|null $name Optionaler Name des zu prüfenden Slots
+     * @return bool True, wenn ein Slot (oder der angegebene Slot) aktiv ist
+     */
+    public function hasActiveSlot(?string $name = null): bool
+    {
+        if ($name === null) {
+            return $this->currentSlot !== null;
+        }
+
+        return $this->currentSlot === $name;
+    }
+
+    /**
+     * Gibt den Namen des aktuell aktiven Slots zurück
+     *
+     * @return string|null Name des aktiven Slots oder null, wenn kein Slot aktiv ist
+     */
+    public function getCurrentSlot(): ?string
+    {
+        return $this->currentSlot;
+    }
+
+    /**
+     * Prüft, ob Inhalt für einen Slot vorhanden ist
+     *
+     * @param string $name Slot-Name
+     * @return bool True, wenn Inhalt vorhanden ist
+     */
+    public function hasSlotContent(string $name): bool
+    {
+        return isset($this->slotContents[$name]);
+    }
+
+    /**
+     * Setzt den Inhalt eines Slots direkt
+     *
+     * @param string $name Slot-Name
+     * @param string $content Slot-Inhalt
+     * @return self
+     */
+    public function setSlotContent(string $name, string $content): self
+    {
+        $this->slotContents[$name] = $content;
+        return $this;
+    }
+
+    /**
+     * Gibt Debug-Informationen zu den aktiven Slots zurück
+     *
+     * @return array Debug-Informationen
+     */
+    public function getSlotDebugInfo(): array
+    {
+        return [
+            'active_slot' => $this->currentSlot,
+            'slot_stack' => $this->slots,
+            'slot_contents' => array_keys($this->slotContents)
+        ];
     }
 
     /**

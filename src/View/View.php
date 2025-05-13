@@ -117,20 +117,25 @@ class View
      */
     public function toResponse(int $status = 200, array $headers = []): Response
     {
-        // Content-Type standardmäßig setzen, wenn nicht vorhanden
+        // Response erstellen mit dem gerenderten Inhalt und Status
+        $response = new Response($this->render(), $status);
+
+        // Content-Type standardmäßig setzen, wenn nicht in den übergebenen Headers
         $hasContentType = false;
         foreach ($headers as $name => $value) {
             if (strtolower($name) === 'content-type') {
                 $hasContentType = true;
-                break;
             }
+            // Jeden Header zur Response hinzufügen
+            $response->setHeader($name, $value);
         }
 
+        // Standard Content-Type hinzufügen, wenn nicht in Headers
         if (!$hasContentType) {
-            $headers['Content-Type'] = 'text/html; charset=UTF-8';
+            $response->setHeader('Content-Type', 'text/html; charset=UTF-8');
         }
 
-        return new Response($this->render(), $status, $headers);
+        return $response;
     }
 
     /**
@@ -148,7 +153,13 @@ class View
             throw new TemplateException('Failed to encode view data as JSON: ' . json_last_error_msg());
         }
 
-        return new Response($json, $status, ['Content-Type' => 'application/json; charset=UTF-8']);
+        // Response mit JSON-Inhalt und Status erstellen
+        $response = new Response($json, $status);
+
+        // Content-Type für JSON setzen
+        $response->setHeader('Content-Type', 'application/json; charset=UTF-8');
+
+        return $response;
     }
 
     /**

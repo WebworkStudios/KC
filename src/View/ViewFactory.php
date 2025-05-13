@@ -159,7 +159,13 @@ class ViewFactory
             throw new TemplateException('Failed to encode data as JSON: ' . json_last_error_msg());
         }
 
-        return new Response($json, $status, ['Content-Type' => 'application/json; charset=UTF-8']);
+        // Response mit JSON-Inhalt und Status erstellen
+        $response = new Response($json, $status);
+
+        // Content-Type für JSON setzen
+        $response->setHeader('Content-Type', 'application/json; charset=UTF-8');
+
+        return $response;
     }
 
     /**
@@ -214,24 +220,6 @@ class ViewFactory
     public function addOutputFilter(callable $filter): self
     {
         $this->engine->addOutputFilter($filter);
-        return $this;
-    }
-
-    /**
-     * Setzt den Router für URL-Generierung
-     *
-     * @param Router $router Router
-     * @return self
-     */
-    public function setRouter(Router $router): self
-    {
-        $this->router = $router;
-
-        // DefaultFunctions mit Router registrieren
-        $this->registerFunctionProvider(new DefaultFunctions($router));
-
-        $this->logger->debug('Router set for URL generation');
-
         return $this;
     }
 
