@@ -464,6 +464,16 @@ class TemplateEngine
     }
 
     /**
+     * Gibt den Template-Loader zurück
+     *
+     * @return TemplateLoaderInterface
+     */
+    public function getLoader(): TemplateLoaderInterface
+    {
+        return $this->loader;
+    }
+
+    /**
      * Führt ein kompiliertes Template aus
      *
      * @param string $path Pfad zum kompilierten Template

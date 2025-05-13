@@ -294,31 +294,72 @@ class ViewFactory
         return $this->engine;
     }
 
+
     /**
-     * Rendert einen Controller mit automatischer View-Erkennung
+     * Rendert eine View basierend auf einer Action mit automatischer View-Erkennung
      *
-     * @param object $controller Controller-Objekt
-     * @param string $method Controller-Methode
+     * @param object $action Action-Objekt
      * @param array<string, mixed> $data View-Daten
      * @return Response HTTP-Response
      */
-    public function renderController(object $controller, string $method, array $data = []): Response
+    public function renderAction(object $action, array $data = []): Response
     {
-        // Controller-Name bestimmen
-        $className = get_class($controller);
+        // Action-Name bestimmen
+        $className = get_class($action);
         $shortName = substr($className, strrpos($className, '\\') + 1);
-        $controllerName = str_replace('Controller', '', $shortName);
 
-        // View-Name generieren
-        $viewName = strtolower($controllerName) . '.' . $method;
+        // View-Name aus dem Action-Namen generieren
+        // z.B. "ShowUserAction" wird zu "user.show"
+        $actionName = $shortName;
 
-        $this->logger->debug('Auto-rendering controller view', [
-            'controller' => $controllerName,
-            'method' => $method,
+        // "Action"-Suffix entfernen, falls vorhanden
+        if (str_ends_with($actionName, 'Action')) {
+            $actionName = substr($actionName, 0, -6);
+        }
+
+        // CamelCase in kebab-case oder dot-notation umwandeln
+        // z.B. "ShowUser" zu "show.user"
+        $actionName = preg_replace('/([a-z])([A-Z])/', '$1.$2', $actionName);
+        $viewName = strtolower($actionName);
+
+        $this->logger->debug('Auto-rendering action view', [
+            'action' => $shortName,
             'view' => $viewName
         ]);
 
+        // Prüfen, ob die View existiert, andernfalls eine generische View verwenden
+        if (!$this->templateExists($viewName)) {
+            $this->logger->warning("View '{$viewName}' not found, trying fallback");
+
+            // Fallback zur Domain-View
+            $parts = explode('.', $viewName);
+            if (count($parts) > 1) {
+                $domainName = end($parts);
+                $viewName = "views.{$domainName}";
+
+                if (!$this->templateExists($viewName)) {
+                    $viewName = 'views.default';
+                }
+            }
+        }
+
         return $this->render($viewName, $data);
+    }
+
+    /**
+     * Überprüft, ob ein Template existiert
+     *
+     * @param string $template Template-Name
+     * @return bool
+     */
+    private function templateExists(string $template): bool
+    {
+        try {
+            return $this->engine->getLoader()->exists($template);
+        } catch (\Throwable $e) {
+            $this->logger->error("Error checking template existence: " . $e->getMessage());
+            return false;
+        }
     }
 
     /**
