@@ -554,6 +554,11 @@ class TemplateEngine
         // Daten extrahieren, damit sie im Template verfügbar sind
         extract($data, EXTR_SKIP);
 
+        // Prüfen, ob die Datei existiert, bevor sie eingebunden wird
+        if (!file_exists($path)) {
+            throw new TemplateException("Kompilierte Template-Datei existiert nicht: {$path}");
+        }
+
         // Output-Puffer starten
         ob_start();
 

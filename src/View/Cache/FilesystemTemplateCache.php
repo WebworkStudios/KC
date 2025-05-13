@@ -231,9 +231,6 @@ class FilesystemTemplateCache implements TemplateCacheInterface
         return $success;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     public function getPath(string $name): string
     {
         // Template-Name normalisieren: Slashes durch Unterstriche ersetzen und speziell kodieren
@@ -247,7 +244,29 @@ class FilesystemTemplateCache implements TemplateCacheInterface
         $fileName = $safeName . '_' . $hash . '.php';
 
         // Vollständigen Pfad zurückgeben
-        return $this->cacheDir . $subDir . DIRECTORY_SEPARATOR . $fileName;
+        $fullPath = $this->cacheDir . $subDir . DIRECTORY_SEPARATOR . $fileName;
+
+        // Sicherstellen, dass das Verzeichnis existiert
+        $dirPath = dirname($fullPath);
+        if (!is_dir($dirPath)) {
+            mkdir($dirPath, 0755, true);
+        }
+
+        return $fullPath;
+    }
+
+    public function debug(string $name): array
+    {
+        $path = $this->getPath($name);
+
+        return [
+            'cache_enabled' => $this->enabled,
+            'cache_path' => $path,
+            'file_exists' => file_exists($path),
+            'is_readable' => is_readable($path),
+            'directory_exists' => is_dir(dirname($path)),
+            'directory_writable' => is_writable(dirname($path))
+        ];
     }
 
     /**

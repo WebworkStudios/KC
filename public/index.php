@@ -83,8 +83,15 @@ $router = new Src\Http\Router($container, $logger);
 $container->register(Src\Http\Router::class, $router);
 
 // Set up View Engine and register the View Service Provider
+// use_cache auf false setzen für Entwicklung
 $viewServiceProvider = new Src\View\ViewServiceProvider();
-$viewServiceProvider->register($container, $config->all());
+$viewServiceProvider->register($container, array_merge($config->all(), [
+    'use_cache' => false
+]));
+
+// Cache leeren
+$viewFactory = $container->get(Src\View\ViewFactory::class);
+$viewFactory->clearCache();
 
 // Create a Request from global variables
 $request = Src\Http\Request::fromGlobals();
