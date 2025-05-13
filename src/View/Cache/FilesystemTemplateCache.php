@@ -127,58 +127,34 @@ class FilesystemTemplateCache implements TemplateCacheInterface
     {
         // Cache-Update überspringen, wenn Cache deaktiviert ist
         if (!$this->enabled) {
-            error_log("Cache ist deaktiviert, Datei wird nicht geschrieben");
             return true;
         }
 
         $path = $this->getPath($name);
 
-        // Mehr Debugging
-        error_log("Versuche Cache-Datei zu schreiben: " . $path);
-        error_log("Cache aktiviert: " . ($this->enabled ? "Ja" : "Nein"));
-
         // Verzeichnisstruktur erstellen
         $dir = dirname($path);
         if (!is_dir($dir)) {
-            error_log("Verzeichnis existiert nicht, erstelle: " . $dir);
             if (!mkdir($dir, 0755, true) && !is_dir($dir)) {
-                error_log("FEHLER: Konnte Verzeichnis nicht erstellen: " . $dir);
                 return false;
             }
-            error_log("Verzeichnis erstellt: " . $dir);
         }
 
-        // Prüfe Berechtigungen
-        if (!is_writable($dir)) {
-            error_log("FEHLER: Verzeichnis ist nicht beschreibbar: " . $dir);
-            chmod($dir, 0755); // Versuche Berechtigungen zu setzen
-            error_log("Berechtigungen gesetzt: " . (is_writable($dir) ? "Erfolgreich" : "Fehlgeschlagen"));
-        }
+        // Datei direkt schreiben
+        $result = file_put_contents($path, $code, LOCK_EX);
 
-        // Datei direkt schreiben ohne @ (um Fehler zu sehen)
-        try {
-            $result = file_put_contents($path, $code, LOCK_EX);
-
-            if ($result === false) {
-                error_log("FEHLER: Konnte Datei nicht schreiben: " . $path);
-                error_log("PHP-Fehler: " . error_get_last()['message'] ?? 'Unbekannt');
-                return false;
-            }
-
-            // Zugriffsrechte setzen
-            chmod($path, 0644);
-
-            error_log("Datei erfolgreich geschrieben: " . $path . " (" . $result . " Bytes)");
-
-            // Cache aktualisieren
-            $this->existsCache[$name] = true;
-            $this->timestampCache[$name] = time();
-
-            return true;
-        } catch (\Throwable $e) {
-            error_log("Exception beim Schreiben der Datei: " . $e->getMessage());
+        if ($result === false) {
             return false;
         }
+
+        // Zugriffsrechte setzen
+        chmod($path, 0644);
+
+        // Cache aktualisieren
+        $this->existsCache[$name] = true;
+        $this->timestampCache[$name] = time();
+
+        return true;
     }
 
     /**

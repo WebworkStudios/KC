@@ -61,7 +61,7 @@ class ViewServiceProvider
             return $compiler;
         });
 
-        // Template-Engine registrieren
+        // Template-Engine registrieren - KORRIGIERTE REIHENFOLGE DER PARAMETER
         $container->register(TemplateEngine::class, function () use ($container, $logger) {
             $loader = $container->get(FilesystemTemplateLoader::class);
             $cache = $container->get(FilesystemTemplateCache::class);

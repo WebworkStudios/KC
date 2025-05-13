@@ -81,7 +81,7 @@ class ViewFactory
         $loader = new FilesystemTemplateLoader($templateDir);
         $cache = new FilesystemTemplateCache($cacheDir, $useCache);
         $compiler = new TemplateCompiler();
-        $engine = new TemplateEngine($loader, $cache, $compiler);
+        $engine = new TemplateEngine($loader, $cache, $compiler); // Korrekte Reihenfolge
 
         $logger->debug('ViewFactory created with auto-configured Template Engine', [
             'templateDir' => $templateDir,
