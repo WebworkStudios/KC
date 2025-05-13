@@ -1,10 +1,13 @@
 # Template Engine für PHP 8.4
 
-Diese leistungsstarke und dennoch schlanke Template-Engine bietet eine intuitive Syntax und optimale Performance für moderne PHP 8.4 Anwendungen. Sie ist speziell für das ADR-Pattern (Action-Domain-Responder) konzipiert und lässt sich nahtlos in das Framework integrieren.
+Diese leistungsstarke und dennoch schlanke Template-Engine bietet eine intuitive Syntax und optimale Performance für
+moderne PHP 8.4 Anwendungen. Sie ist speziell für das ADR-Pattern (Action-Domain-Responder) konzipiert und lässt sich
+nahtlos in das Framework integrieren.
 
 ## Features
 
-- **Moderne Syntax**: Einfache, intuitive Template-Syntax mit `{{ variable }}` für Variablen und `{% directive %}` für Kontrollstrukturen.
+- **Moderne Syntax**: Einfache, intuitive Template-Syntax mit `{{ variable }}` für Variablen und `{% directive %}` für
+  Kontrollstrukturen.
 - **Layout-System**: Flexibles Layout-System mit Template-Vererbung und wiederverwendbaren Sections.
 - **Komponenten**: Wiederverwendbare UI-Komponenten mit Parameter-Unterstützung.
 - **Hilfsfunktionen**: Umfangreiche Sammlung von Hilfsfunktionen für Formatierung, URL-Generierung und mehr.
@@ -175,7 +178,8 @@ $viewFactory->registerFunction('shorten', function(string $text, int $length = 1
 
 ## Performance-Optimierung
 
-Die Template-Engine kompiliert Templates in nativen PHP-Code und cached das Ergebnis. In der Produktionsumgebung müssen Templates nur bei Änderungen neu kompiliert werden.
+Die Template-Engine kompiliert Templates in nativen PHP-Code und cached das Ergebnis. In der Produktionsumgebung müssen
+Templates nur bei Änderungen neu kompiliert werden.
 
 ```php
 // Cache leeren (z.B. nach Deployment)
@@ -184,12 +188,15 @@ $viewFactory->clearCache();
 
 ## Fehlerbehandlung
 
-Template-Fehler werden als `TemplateException` geworfen und enthalten detaillierte Informationen über den Fehler und die Zeile, in der er aufgetreten ist. In der Entwicklungsumgebung werden diese Fehler mit Debug-Informationen angezeigt.
+Template-Fehler werden als `TemplateException` geworfen und enthalten detaillierte Informationen über den Fehler und die
+Zeile, in der er aufgetreten ist. In der Entwicklungsumgebung werden diese Fehler mit Debug-Informationen angezeigt.
 
 ## Dependency Injection
 
-Die Template-Engine unterstützt Dependency Injection und kann einfach im Container registriert werden. Der `ViewServiceProvider` übernimmt die Registrierung aller benötigten Komponenten.
+Die Template-Engine unterstützt Dependency Injection und kann einfach im Container registriert werden. Der
+`ViewServiceProvider` übernimmt die Registrierung aller benötigten Komponenten.
 
 ## Sicherheit
 
-Alle Ausgaben werden standardmäßig escaped, um XSS-Angriffe zu verhindern. Unescaped-Ausgaben mit `{!! ... !!}` sollten nur für vertrauenswürdige Inhalte verwendet werden.
+Alle Ausgaben werden standardmäßig escaped, um XSS-Angriffe zu verhindern. Unescaped-Ausgaben mit `{!! ... !!}` sollten
+nur für vertrauenswürdige Inhalte verwendet werden.
