@@ -5,6 +5,10 @@ namespace Src\View;
 use Src\Container\Container;
 use Src\Http\Router;
 use Src\Log\LoggerInterface;
+use Src\View\Cache\FilesystemTemplateCache;
+use Src\View\Compiler\TemplateCompiler;
+use Src\View\Functions\DefaultFunctions;
+use Src\View\Loader\FilesystemTemplateLoader;
 
 /**
  * Service-Provider für die Template-Engine und ViewFactory
@@ -36,14 +40,34 @@ class ViewServiceProvider
             'use_cache' => $config['use_cache']
         ]);
 
-        // Template-Engine registrieren
-        $container->register(TemplateEngine::class, function () use ($config, $logger) {
-            $engine = new TemplateEngine(
-                $config['template_dir'],
-                $config['cache_dir'],
-                $config['use_cache']
-            );
+        // Template-Loader registrieren
+        $container->register(FilesystemTemplateLoader::class, function () use ($config, $logger) {
+            $loader = new FilesystemTemplateLoader($config['template_dir']);
+            $logger->debug("Template loader registered");
+            return $loader;
+        });
 
+        // Template-Cache registrieren
+        $container->register(FilesystemTemplateCache::class, function () use ($config, $logger) {
+            $cache = new FilesystemTemplateCache($config['cache_dir'], $config['use_cache']);
+            $logger->debug("Template cache registered");
+            return $cache;
+        });
+
+        // Template-Compiler registrieren
+        $container->register(TemplateCompiler::class, function () use ($logger) {
+            $compiler = new TemplateCompiler();
+            $logger->debug("Template compiler registered");
+            return $compiler;
+        });
+
+        // Template-Engine registrieren
+        $container->register(TemplateEngine::class, function () use ($container, $logger) {
+            $loader = $container->get(FilesystemTemplateLoader::class);
+            $cache = $container->get(FilesystemTemplateCache::class);
+            $compiler = $container->get(TemplateCompiler::class);
+
+            $engine = new TemplateEngine($loader, $cache, $compiler);
             $logger->debug("Template engine registered");
             return $engine;
         });
@@ -56,10 +80,18 @@ class ViewServiceProvider
             // Router für URL-Generierung setzen, falls verfügbar
             if ($container->has(Router::class)) {
                 $router = $container->get(Router::class);
-                $factory->setRouter($router);
-                $logger->debug("Router set in ViewFactory");
+
+                // DefaultFunctions mit Router registrieren
+                $defaultFunctions = new DefaultFunctions($router);
+                $engine->registerFunctionProvider($defaultFunctions);
+
+                $logger->debug("Router set in DefaultFunctions");
             } else {
-                $logger->warning("Router not available for ViewFactory");
+                // DefaultFunctions ohne Router registrieren
+                $defaultFunctions = new DefaultFunctions();
+                $engine->registerFunctionProvider($defaultFunctions);
+
+                $logger->warning("Router not available for DefaultFunctions");
             }
 
             return $factory;
