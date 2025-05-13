@@ -50,7 +50,8 @@ class FilesystemTemplateCache implements TemplateCacheInterface
      */
     public function __construct(string $cacheDir, bool $enabled = true)
     {
-        $this->cacheDir = rtrim($cacheDir, '/\\') . DIRECTORY_SEPARATOR;
+        // Normalisiere den Pfad mit DIRECTORY_SEPARATOR
+        $this->cacheDir = rtrim(str_replace(['\\', '/'], DIRECTORY_SEPARATOR, $cacheDir), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         $this->enabled = $enabled;
 
         // Prüfen, ob das Verzeichnis existiert und erstellen, falls nicht
@@ -122,7 +123,6 @@ class FilesystemTemplateCache implements TemplateCacheInterface
     /**
      * {@inheritDoc}
      */
-
     public function put(string $name, string $code): bool
     {
         // Cache-Update überspringen, wenn Cache deaktiviert ist
@@ -230,42 +230,36 @@ class FilesystemTemplateCache implements TemplateCacheInterface
         return $success;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public function getPath(string $name): string
     {
-        // Template-Name normalisieren: Slashes durch Unterstriche ersetzen und speziell kodieren
-        $safeName = str_replace(['\\', '/', '.'], '_', $name);
+        // Konsequente Verwendung von DIRECTORY_SEPARATOR
+        // Template-Name normalisieren für konsistentes Caching:
+        // 1. Ersetze Trennzeichen mit einheitlichem Zeichen
+        $normalizedName = str_replace(['\\', '/'], '_', $name);
 
-        // Hash erstellen für lange Namen und zur Vermeidung von ungültigen Dateinamen
+        // 2. Entferne unsichere Zeichen
+        $safeName = preg_replace('/[^a-zA-Z0-9_]/', '_', $normalizedName);
+
+        // Hash erstellen für Verzeichnisstruktur
         $hash = md5($name);
 
         // Unterverzeichnisse basierend auf dem Hash erstellen (für bessere Performance)
         $subDir = substr($hash, 0, 2) . DIRECTORY_SEPARATOR . substr($hash, 2, 2);
         $fileName = $safeName . '_' . $hash . '.php';
 
-        // Vollständigen Pfad zurückgeben
-        $fullPath = $this->cacheDir . $subDir . DIRECTORY_SEPARATOR . $fileName;
+        // Vollständigen Pfad zurückgeben mit korrektem Trennzeichen
+        $dirPath = $this->cacheDir . $subDir;
+        $fullPath = $dirPath . DIRECTORY_SEPARATOR . $fileName;
 
         // Sicherstellen, dass das Verzeichnis existiert
-        $dirPath = dirname($fullPath);
         if (!is_dir($dirPath)) {
             mkdir($dirPath, 0755, true);
         }
 
         return $fullPath;
-    }
-
-    public function debug(string $name): array
-    {
-        $path = $this->getPath($name);
-
-        return [
-            'cache_enabled' => $this->enabled,
-            'cache_path' => $path,
-            'file_exists' => file_exists($path),
-            'is_readable' => is_readable($path),
-            'directory_exists' => is_dir(dirname($path)),
-            'directory_writable' => is_writable(dirname($path))
-        ];
     }
 
     /**
@@ -346,5 +340,30 @@ class FilesystemTemplateCache implements TemplateCacheInterface
     public function getCacheDir(): string
     {
         return $this->cacheDir;
+    }
+
+    /**
+     * Debug-Informationen zum Cache-Status
+     *
+     * @param string $name Template-Name
+     * @return array Debug-Informationen
+     */
+    public function debug(string $name): array
+    {
+        $path = $this->getPath($name);
+        $dirPath = dirname($path);
+
+        return [
+            'cache_enabled' => $this->enabled,
+            'cache_path' => $path,
+            'cache_dir' => $this->cacheDir,
+            'file_exists' => file_exists($path),
+            'is_readable' => is_readable($path),
+            'directory_path' => $dirPath,
+            'directory_exists' => is_dir($dirPath),
+            'directory_writable' => is_writable($dirPath),
+            'cache_entry' => isset($this->existsCache[$name]) ? 'exists' : 'not found',
+            'timestamp_entry' => isset($this->timestampCache[$name]) ? $this->timestampCache[$name] : 'not found'
+        ];
     }
 }

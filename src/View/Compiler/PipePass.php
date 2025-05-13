@@ -24,6 +24,16 @@ class PipePass extends AbstractCompilerPass
      */
     public function process(string $code, array $context = []): string
     {
+        // Pipes in If-Statements finden und vorverarbeiten
+        $code = preg_replace_callback(
+            '/{%\s*if\s+(.*?\|length.*?)\s*%}/s',
+            function ($matches) {
+                $condition = $this->preProcessIfConditionWithPipe($matches[1]);
+                return '{% if ' . $condition . ' %}';
+            },
+            $code
+        );
+
         // Pipes in Variablen ({{ var|filter1|filter2 }}) finden und verarbeiten
         $code = preg_replace_callback(
             '/\{\{\s*(.*?\|.*?)\s*\}\}/',
@@ -48,6 +58,24 @@ class PipePass extends AbstractCompilerPass
     }
 
     /**
+     * Vorverarbeitung von If-Bedingungen mit Pipe-Operatoren
+     *
+     * @param string $condition Bedingung mit Pipe-Operatoren
+     * @return string Vorverarbeitete Bedingung
+     */
+    private function preProcessIfConditionWithPipe(string $condition): string
+    {
+        // Spezielle Behandlung für players|length > 0
+        return preg_replace_callback(
+            '/(\w+)\|length\s*(>|<|>=|<=|==|!=)\s*(\d+)/',
+            function ($matches) {
+                return 'count(' . $matches[1] . ') ' . $matches[2] . ' ' . $matches[3];
+            },
+            $condition
+        );
+    }
+
+    /**
      * Verarbeitet einen Pipe-Ausdruck
      *
      * @param string $expression Pipe-Ausdruck (z.B. "var|filter1:arg1,arg2|filter2")
@@ -62,11 +90,18 @@ class PipePass extends AbstractCompilerPass
         if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $base)) {
             $base = '$' . $base;
         } else {
+            // Komplexere Ausdrücke verarbeiten
             $base = $this->transformVariables($base);
         }
 
         foreach ($parts as $part) {
             $part = trim($part);
+
+            // Spezielle Behandlung für 'length' Filter
+            if ($part === 'length') {
+                $base = "count($base)";
+                continue;
+            }
 
             // Filter mit Argumenten (filter:arg1,arg2)
             if (strpos($part, ':') !== false) {

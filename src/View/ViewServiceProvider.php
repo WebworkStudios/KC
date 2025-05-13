@@ -68,7 +68,11 @@ class ViewServiceProvider
             $compiler = $container->get(TemplateCompiler::class);
 
             $engine = new TemplateEngine($loader, $cache, $compiler);
-            $logger->debug("Template engine registered");
+
+            // Standard-Hilfsfunktionen registrieren
+            $this->registerDefaultTemplateFunctions($engine);
+
+            $logger->debug("Template engine registered with default functions");
             return $engine;
         });
 
@@ -103,5 +107,89 @@ class ViewServiceProvider
         });
 
         $logger->info("View services registered successfully");
+    }
+
+    /**
+     * Registriert die Standard-Template-Funktionen
+     *
+     * @param TemplateEngine $engine Die Template-Engine
+     * @return void
+     */
+    private function registerDefaultTemplateFunctions(TemplateEngine $engine): void
+    {
+        // URL-Funktion
+        $engine->registerFunction('url', function (string $route, array $params = []) {
+            // Einfache Implementierung
+            $url = '/' . trim($route, '/');
+
+            // Parameter als Query-String hinzufügen
+            if (!empty($params)) {
+                $queryString = http_build_query($params);
+                $url .= '?' . $queryString;
+            }
+
+            return $url;
+        });
+
+        // DateFormat-Funktion
+        $engine->registerFunction('dateFormat', function ($date, $format = 'd.m.Y') {
+            if ($date instanceof \DateTime) {
+                return $date->format($format);
+            }
+
+            if (is_string($date)) {
+                return date($format, strtotime($date));
+            }
+
+            return '';
+        });
+
+        // Length-Funktion für Arrays und Strings
+        $engine->registerFunction('length', function ($value) {
+            if (is_array($value) || $value instanceof \Countable) {
+                return count($value);
+            }
+
+            if (is_string($value)) {
+                return mb_strlen($value, 'UTF-8');
+            }
+
+            return 0;
+        });
+
+        // JSON-Funktion
+        $engine->registerFunction('json', function ($value, $options = 0) {
+            return json_encode($value, $options | JSON_UNESCAPED_UNICODE);
+        });
+
+        // Escape-Funktion (bereits als 'e' in der Engine registriert, aber für Vollständigkeit)
+        $engine->registerFunction('escape', function ($value) {
+            return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8', false);
+        });
+
+        // Dump-Funktion für Debugging
+        $engine->registerFunction('dump', function ($value) {
+            ob_start();
+            var_dump($value);
+            $dump = ob_get_clean();
+            return '<pre>' . htmlspecialchars($dump, ENT_QUOTES, 'UTF-8') . '</pre>';
+        });
+
+        // Upper-Funktion für Strings
+        $engine->registerFunction('upper', function ($value) {
+            return mb_strtoupper((string)$value, 'UTF-8');
+        });
+
+        // Lower-Funktion für Strings
+        $engine->registerFunction('lower', function ($value) {
+            return mb_strtolower((string)$value, 'UTF-8');
+        });
+
+        // Formatierung von Zahlen
+        $engine->registerFunction('number_format', function ($value, $decimals = 2, $dec_point = ',', $thousands_sep = '.') {
+            return number_format((float)$value, $decimals, $dec_point, $thousands_sep);
+        });
+
+        // Wenn Sie einen Router haben, könnten Sie hier eine fortgeschrittenere URL-Funktion erstellen
     }
 }
