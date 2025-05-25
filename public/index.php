@@ -85,9 +85,7 @@ $container->register(Src\Http\Router::class, $router);
 // Set up View Engine and register the View Service Provider
 // use_cache auf false setzen für Entwicklung
 $viewServiceProvider = new Src\View\ViewServiceProvider();
-$viewServiceProvider->register($container, array_merge($config->all(), [
-    'use_cache' => false
-]));
+$viewServiceProvider->register($container, $config);
 
 // Cache leeren
 $viewFactory = $container->get(Src\View\ViewFactory::class);
