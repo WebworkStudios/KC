@@ -26,7 +26,7 @@
         </div>
 
         <div class="card-body">
-            {% if players is not null and players|length > 0 %}
+
             <div class="table-responsive">
                 <table class="table table-striped table-hover">
                     <thead>
@@ -39,7 +39,7 @@
                     </tr>
                     </thead>
                     <tbody>
-                    {% foreach players as player %}
+                    {% foreach $players as $key => $player %}
                     <tr>
                         <td>{{ player.player_id }}</td>
                         <td>{{ player.first_name }}</td>
@@ -62,11 +62,6 @@
                     </tbody>
                 </table>
             </div>
-            {% else %}
-            <div class="alert alert-info">
-                Keine Spieler gefunden.
-            </div>
-            {% endif %}
         </div>
     </div>
 </div>

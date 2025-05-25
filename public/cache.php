@@ -219,7 +219,120 @@ if (isset($_GET['action'])) {
                     return false;
                 });
 
+                // Config get function
+                // Corrected implementation for the get function
+
+// Config get function
+                $engine->registerFunction('get', function (string $key, $default = null) {
+                    // Simple implementation of a config getter
+                    // In a real application, this would access your config repository
+                    $config = [
+                        'app.name' => 'KickersCup',
+                        'app.version' => '1.0.0',
+                        'app.debug' => true,
+                        'app.url' => 'http://localhost',
+                        'database.default' => 'mysql',
+                        // Add more config values as needed based on what your template uses
+                    ];
+
+                    // Direct key lookup first (for keys with dots in them)
+                    if (isset($config[$key])) {
+                        return $config[$key];
+                    }
+
+                    // Support dot notation (e.g., 'app.name')
+                    $parts = explode('.', $key);
+
+                    // Handle nested arrays
+                    $current = $config;
+                    foreach ($parts as $part) {
+                        if (!is_array($current) || !isset($current[$part])) {
+                            return $default;
+                        }
+                        $current = $current[$part];
+                    }
+
+                    return $current;
+                });
+
+// You might also want to add a config function as an alternative
+                $engine->registerFunction('config', function (string $key, $default = null) use ($engine) {
+                    // Call the 'get' function we just registered
+                    return $engine->callFunction('get', [$key, $default]);
+                });
+
+
+// First, let's add a basic implementation of a null function
+// This is likely what the template is trying to use with $null
+                $engine->registerFunction('null', function () {
+                    return null;
+                });
+
+// Add an empty function to check if a value is empty or null
+                $engine->registerFunction('empty', function ($value) {
+                    return empty($value);
+                });
+
+// Add an isset function to check if a variable is set
+                $engine->registerFunction('isset', function ($value) {
+                    return isset($value);
+                });
+
+// Add a print_r function for debugging arrays
+                $engine->registerFunction('print_r', function ($value, bool $return = false) {
+                    if ($return) {
+                        return print_r($value, true);
+                    }
+                    return "<pre>" . htmlspecialchars(print_r($value, true)) . "</pre>";
+                });
+
+// Add a var_dump function for debugging values
+                $engine->registerFunction('var_dump', function ($value) {
+                    ob_start();
+                    var_dump($value);
+                    $output = ob_get_clean();
+                    return "<pre>" . htmlspecialchars($output) . "</pre>";
+                });
+
+// Add a dd (dump and die) function for debugging
+                $engine->registerFunction('dd', function ($value) {
+                    echo "<pre>";
+                    var_dump($value);
+                    echo "</pre>";
+                    exit;
+                });
+
+// Add a collection function to handle arrays more elegantly
+                $engine->registerFunction('collection', function ($array) {
+                    return $array;
+                });
+
+// Add a count function
+                $engine->registerFunction('count', function ($value) {
+                    if (is_array($value) || $value instanceof \Countable) {
+                        return count($value);
+                    }
+                    return 0;
+                });
+
+// Add a method to check if an array is empty
+                $engine->registerFunction('isEmpty', function ($value) {
+                    if (is_array($value)) {
+                        return count($value) === 0;
+                    }
+                    return empty($value);
+                });
+
+// Add methods to handle array to string conversion
+                $engine->registerFunction('implode', function ($separator, $array) {
+                    if (is_array($array)) {
+                        return implode($separator, $array);
+                    }
+                    return (string)$array;
+                });
+
                 // Testdaten
+// Im Test-Data-Array sicherstellen, dass jeder Spieler ein player_id hat
                 $data = [
                     'title' => 'Test-Spielerliste',
                     'playersCount' => 3,
